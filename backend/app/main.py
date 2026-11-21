@@ -9,7 +9,7 @@ from fastapi import FastAPI
 
 from app.config import Settings, load_settings
 from app.db import init_db, make_engine
-from app.routers import demo
+from app.routers import demo, llm_proxy
 
 VERSION = "0.1.0"
 
@@ -30,6 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.include_router(demo.router)
+    app.include_router(llm_proxy.router)
     return app
 
 
