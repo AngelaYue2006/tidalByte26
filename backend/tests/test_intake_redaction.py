@@ -237,12 +237,17 @@ class FakeHttpClient:
 
     built: ClassVar[list[dict]] = []
     posts: ClassVar[list[str]] = []
+    bodies: ClassVar[list[dict]] = []
+    fail_with: ClassVar[type[Exception] | None] = None
 
     def __init__(self, **kwargs) -> None:
         FakeHttpClient.built.append(kwargs)
 
     def post(self, path: str, json: dict | None = None):
         FakeHttpClient.posts.append(path)
+        FakeHttpClient.bodies.append(json or {})
+        if FakeHttpClient.fail_with is not None:
+            raise FakeHttpClient.fail_with("simulated")
 
         class Response:
             def raise_for_status(self) -> None:
@@ -258,8 +263,60 @@ class FakeHttpClient:
 def fake_http(monkeypatch):
     FakeHttpClient.built.clear()
     FakeHttpClient.posts.clear()
+    FakeHttpClient.bodies.clear()
+    FakeHttpClient.fail_with = None
     monkeypatch.setattr(httpx, "Client", FakeHttpClient)
     return FakeHttpClient
+
+
+def test_every_ollama_request_turns_thinking_off_and_keeps_the_model_loaded(fake_http):
+    client = OllamaClient("http://localhost:11434/", "nano-test-tag")
+    run(ROWS[0], client)
+    (body,) = fake_http.bodies
+    assert body["think"] is False
+    assert body["keep_alive"] == "30m"
+    assert body["options"] == {"temperature": 0} and body["stream"] is False
+
+
+def test_warm_up_loads_the_model_without_sending_any_text(fake_http):
+    client = OllamaClient("http://localhost:11434", "nano-test-tag")
+    assert client.warm_up() is True
+    assert fake_http.posts == ["/api/generate"]
+    (body,) = fake_http.bodies
+    assert body == {"model": "nano-test-tag", "think": False, "keep_alive": "30m"}
+
+
+def test_warm_up_never_raises_when_ollama_is_down(fake_http):
+    fake_http.fail_with = httpx.ConnectError
+    client = OllamaClient("http://localhost:11434", "nano-test-tag")
+    assert client.warm_up() is False
+
+
+def test_warm_up_in_background_runs_on_a_thread_and_skips_cleanly(fake_http):
+    from app.nemotron.local_intake import warm_up_in_background
+
+    thread = warm_up_in_background("http://localhost:11434", "nano-test-tag")
+    assert thread is not None and thread.daemon
+    thread.join(timeout=5)
+    assert fake_http.posts == ["/api/generate"]
+    assert warm_up_in_background("http://localhost:11434", None) is None
+    assert warm_up_in_background("http://ollama.example.com:11434", "nano-test-tag") is None  # remote host refused, no request
+    assert fake_http.posts == ["/api/generate"]
+
+
+def test_app_startup_warms_the_model_in_the_background(fake_http):
+    from app.config import load_settings
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    app = create_app(load_settings(env_file=None, environ={"DATABASE_URL": "sqlite://", "NEMOTRON_NANO_TAG": "nano-test-tag"}))
+    with TestClient(app) as c:
+        assert c.get("/api/health").status_code == 200  # startup did not wait on the warm-up
+        app.state.warm_up_thread.join(timeout=5)
+    assert fake_http.posts == ["/api/generate"]
+    app = create_app(load_settings(env_file=None, environ={"DATABASE_URL": "sqlite://"}))
+    with TestClient(app):
+        assert app.state.warm_up_thread is None  # no tag, no request, startup still fine
 
 
 def test_ollama_client_only_calls_ollama_base_url_and_ignores_proxies(fake_http):

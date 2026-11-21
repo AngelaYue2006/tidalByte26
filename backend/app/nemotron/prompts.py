@@ -91,3 +91,24 @@ Rules:
 - If put on hold, say "Sure, I'll hold." and wait. If you reach voicemail, say you will call back and end the call.
 - When you have the three facts, thank them and say goodbye in one sentence.
 """
+
+
+# --- call summary (Super), #21 ------------------------------------------------------------------
+
+CALL_SUMMARY_SYSTEM = """You read the transcript of one short phone call between an AI assistant and a clinic receptionist and extract three facts.
+Return ONLY a JSON object with exactly these keys:
+{
+  "price_usd": <number or null>,        // what the receptionist said the visit costs, in US dollars; null if never stated
+  "insured": <true, false or null>,     // true if the receptionist said they take the patient's insurance, false if they said no, null if not discussed
+  "slot_start": "<ISO 8601 date-time with offset, or null>",   // the earliest appointment the receptionist offered
+  "slot_end": "<ISO 8601 date-time with offset, or null>",     // slot_start plus the stated length, or plus 60 minutes
+  "slot_label": "<short label like Thu 9:30, or null>"
+}
+Use only what the receptionist actually said. Never guess a price or a time. Resolve weekday names against the call date and timezone given. If the receptionist offered nothing, every slot field is null.
+"""
+
+
+def call_summary_user(transcript: list[dict], *, call_date_iso: str, timezone: str) -> str:
+    """Facts-only user message: the transcript lines (agent and clinic speech only) plus the date context."""
+    lines = [f"{t.get('speaker', '?')}: {t.get('text', '')}" for t in transcript]
+    return json.dumps({"call_date": call_date_iso, "timezone": timezone, "transcript": lines}, ensure_ascii=False)
