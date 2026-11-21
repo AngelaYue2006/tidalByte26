@@ -1,4 +1,4 @@
-"""Fixture clinic discovery; no network calls or real clinic lookups."""
+"""Typed clinic discovery with fixture and demo-safe live Places modes."""
 
 import os
 
@@ -7,13 +7,11 @@ from integrations.types import Clinic
 
 
 def find_clinics(care_type, area, limit=3) -> list[Clinic]:
-    if os.getenv("PLACES_MODE", "fixture") != "fixture":
-        raise RuntimeError(
-            "Places live mode is not implemented; use PLACES_MODE=fixture"
-        )
     if (
-        not care_type
-        or not area
+        not isinstance(care_type, str)
+        or not care_type.strip()
+        or not isinstance(area, str)
+        or not area.strip()
         or isinstance(limit, bool)
         or not isinstance(limit, int)
     ):
@@ -22,6 +20,17 @@ def find_clinics(care_type, area, limit=3) -> list[Clinic]:
         )
     if limit < 0:
         raise RuntimeError("Clinic limit cannot be negative")
+    mode = os.getenv("PLACES_MODE", "fixture")
+    if mode not in ("fixture", "live"):
+        raise RuntimeError("PLACES_MODE must be fixture or live")
+    if mode == "live":
+        if limit > 3:
+            raise RuntimeError("Live clinic limit cannot exceed three")
+        if limit == 0:
+            return []
+        from integrations.places_live import find
+
+        return find(care_type.strip(), area.strip(), limit)
     fixture = read_fixture("clinics.json")
     if care_type.casefold() != fixture["care_type"].casefold():
         return []

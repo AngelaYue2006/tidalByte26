@@ -8,6 +8,7 @@ import {
   type DashboardState,
 } from "@/lib/dashboard";
 import { isLiveEvent, type LiveEvent } from "@/lib/events";
+import { bootstrapSession } from "@/lib/session";
 
 export function liveUrl(viewerId: string): string {
   return `/api/live?viewer_id=${encodeURIComponent(viewerId)}`;
@@ -100,20 +101,41 @@ export class LiveSession {
 
 function connectSse(viewerId: string, handlers: LiveHandlers): () => void {
   const gate = createGate(handlers);
-  const source = new EventSource(liveUrl(viewerId));
+  let source: EventSource | null = null;
+  let closed = false;
+  let gotMessage = false;
+  let rebootstrapped = false;
 
-  source.onmessage = (ev) => {
-    const payload = parsePayload(ev.data);
-    if (!isLiveEvent(payload)) return;
-    gate.apply(payload, ev.lastEventId || null);
+  const open = () => {
+    if (closed) return;
+    source = new EventSource(liveUrl(viewerId));
+
+    source.onmessage = (ev) => {
+      gotMessage = true;
+      const payload = parsePayload(ev.data);
+      if (!isLiveEvent(payload)) return;
+      gate.apply(payload, ev.lastEventId || null);
+    };
+
+    source.onerror = (err) => {
+      if (!gotMessage && !rebootstrapped) {
+        // First failure before any message: the session cookie was probably missing.
+        rebootstrapped = true;
+        source?.close();
+        void bootstrapSession().then(open);
+        return;
+      }
+      // Browser reconnects EventSource automatically; surface the error to the UI.
+      handlers.onError?.(err);
+    };
   };
 
-  source.onerror = (err) => {
-    // Browser reconnects EventSource automatically; surface the error to the UI.
-    handlers.onError?.(err);
-  };
+  void bootstrapSession().then(open);
 
-  return () => source.close();
+  return () => {
+    closed = true;
+    source?.close();
+  };
 }
 
 function connectPoll(
@@ -129,6 +151,7 @@ function connectPoll(
   const tick = async () => {
     if (stopped) return;
     try {
+      // getEvents goes through apiFetch: a 401 fetches the session once and retries (lib/session.ts).
       const payload = await getEvents(taskId, viewerId);
       for (const item of normalizeEventList(payload)) {
         gate.apply(item.event, item.id);
@@ -188,4 +211,5 @@ export function connectLive(viewerId: string, options: ConnectLiveOptions = {}):
   return connectSse(viewerId, handlers);
 }
 
+export { bootstrapSession };
 export type { DashboardState };

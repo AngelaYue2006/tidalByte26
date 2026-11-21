@@ -20,7 +20,10 @@ if [ -d frontend/node_modules ]; then
 else echo "skip: frontend/node_modules missing (cd frontend && npm install)"; fi
 
 echo "== secrets"
-if git grep -nE '(sk_|AC[0-9a-f]{32}|nvapi-|AIza)[A-Za-z0-9_-]{8,}' -- ':!scripts/check.sh' >/dev/null; then echo "::error::possible secret committed"; status=1; fi
+# Key shapes only, each preceded by a non-identifier character so names like task_projection pass:
+# Stripe sk_live_/sk_test_, ElevenLabs sk_ + 32 hex, OpenAI-style sk-, Twilio AC + 32 hex, NVIDIA nvapi-, Google AIza.
+secret_re='(^|[^A-Za-z0-9_])(sk_(live|test)_[A-Za-z0-9]{16,}|sk_[0-9a-f]{32,}|sk-[A-Za-z0-9_-]{20,}|AC[0-9a-f]{32}|nvapi-[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{30,})'
+if git grep --untracked -nE "$secret_re" -- ':!scripts/check.sh' >/dev/null; then echo "::error::possible secret committed"; status=1; fi
 
 [ "$status" -eq 0 ] && echo "check: ok" || echo "check: FAILED"
 exit $status

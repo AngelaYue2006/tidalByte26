@@ -8,3 +8,6 @@ pydantic
 jsonschema
 pytest
 pytest-asyncio
+google-auth
+requests
+tzdata
