@@ -1,4 +1,4 @@
-// Live dashboard placeholder. Sections land in later issues: RequestBar, CallCards, DecisionCard, TransportCard, Confirmations.
+// Live dashboard. RequestBar is live; CallCards, DecisionCard, TransportCard, Confirmations follow.
 import { Suspense } from "react";
 import LivePlaceholder from "@/components/LivePlaceholder";
 

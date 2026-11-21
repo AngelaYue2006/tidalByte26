@@ -147,6 +147,141 @@ select {
   word-break: break-all;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.request-bar-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.request-bar-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.request-bar-people {
+  font-size: 0.85rem;
+}
+
+.request-bar-for {
+  font-size: 0.85rem;
+  margin-top: 2px;
+}
+
+.request-bar-text {
+  margin: 6px 0 0;
+  font-size: 1.05rem;
+}
+
+.mic-btn {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: var(--accent-bg);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mic-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mic-btn-live {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--card);
+  animation: pulse 1.2s infinite;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--chip);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+
+.chip-good {
+  background: var(--good-bg);
+  color: var(--good);
+}
+
+.request-bar-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.request-input {
+  flex: 1;
+  min-width: 12rem;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+
+.request-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: var(--ink);
+  color: var(--card);
+  cursor: pointer;
+}
+
+.request-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.request-bar-error {
+  margin: 8px 0 0;
+  color: var(--bad);
+  font-size: 0.9rem;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
 @media (max-width: 800px) {
   .wrap {
     padding: 16px;
@@ -154,5 +289,10 @@ select {
 
   html {
     font-size: 17px;
+  }
+
+  .mic-btn {
+    width: 56px;
+    height: 56px;
   }
 }
