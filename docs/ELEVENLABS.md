@@ -1,6 +1,6 @@
 # ElevenLabs Agents over Twilio — verified facts (issue #6)
 
-Checked against the vendor documentation on 2026-11-21. Field and header names are verbatim. Builders of #20 (proxy), #21 (post-call webhook) and #26 (first live call) build to this file; a live call in #26 confirms the two items marked *unverified live*.
+Checked against the vendor documentation on 2026-11-21, then against the live agent (name `LifeLine`, published the same day; its id lives only in `.env`). Field and header names are verbatim. Builders of #20 (proxy), #21 (post-call webhook) and #26 (first live call) build to this file.
 
 ## Outbound call
 
@@ -19,9 +19,9 @@ Response: `success`, `message`, `conversation_id` (store as `calls.external_ref`
 
 ## Custom LLM (the backend proxy)
 
-- The agent is configured with a server URL and a model id; the server must implement `/v1/chat/completions` (OpenAI Chat Completions). Point the server URL at `PUBLIC_BASE_URL/v1`. *Unverified live*: whether the dashboard appends `/chat/completions` or wants the full path; try the base first.
+- The agent is configured with a server URL and a model id; the server must implement `/v1/chat/completions` (OpenAI Chat Completions). **Verified in the dashboard**: the Server URL field takes the base URL and the agent appends `/chat/completions` itself, so the setting is `PUBLIC_BASE_URL/v1`.
 - Replies are Server-Sent Events, `Content-Type: text/event-stream`, each chunk `data: {json}` and a final `data: [DONE]`. Stream from NVIDIA with `stream: true` and relay the chunks.
-- **How `call_id` reaches the proxy**: not through dynamic variables. The request body carries `elevenlabs_extra_body`, an object with whatever was passed as `custom_llm_extra_body` at call start. The proxy reads `call_id` and `proxy_secret` from there. *Unverified live*: some agent dashboards have a "Custom LLM extra body" switch under the agent's security settings; if the key is missing from the first request, enable it.
+- **How `call_id` reaches the proxy**: not through dynamic variables. The request body carries `elevenlabs_extra_body`, an object with whatever was passed as `custom_llm_extra_body` at call start. The proxy reads `call_id` and `proxy_secret` from there. **Verified in the dashboard**: the switch is agent Settings → Security → Overrides → "Custom LLM extra body", and it is on for the `LifeLine` agent.
 - The docs do not state how a secret for a custom server is sent, so `proxy_secret` travels in `custom_llm_extra_body`, which is documented. The proxy rejects any request whose `elevenlabs_extra_body.proxy_secret` does not equal `LLM_PROXY_SECRET`.
 - If the model supports function calling, ElevenLabs system tools (end call) can be used; LifeLine does not need them for the demo.
 - Reasoning deltas, if the model emits them, come as `reasoning` or `reasoning_content`; the proxy drops them.
@@ -35,6 +35,11 @@ Response: `success`, `message`, `conversation_id` (store as `calls.external_ref`
 - Failure payload: `data.conversation_id`, `data.failure_reason` (`busy`, `no-answer`, `unknown`) → `CALL_FAILED`.
 - Respond `200` fast; retries resend the same payload, so key on `conversation_id`. Ten consecutive failures disable the webhook.
 
-## Concurrency
+## Agent state (2026-11-21)
 
-The limit is per subscription and is shown on the pricing page and in the workspace, not in the docs. **Still to read off the team account.** If the plan allows fewer than three concurrent conversations: burst pricing lets an agent run up to three times its limit at double the per-minute rate, and call queueing holds extra calls instead of rejecting them. `VOICE_MODE=mock` is the fallback either way.
+- Agent `LifeLine` created and published; first message and system prompt from `integrations/elevenlabs_agent_prompt.md`; Store Call Audio off (D14); data collection fields `price`, `slot`, `insured`, all strings.
+- Pending: the post-call webhook (its URL cannot be edited after creation, so it waits for the ngrok domain in `PUBLIC_BASE_URL`), and the Twilio number import (#7, Angela).
+
+## Concurrency and minutes
+
+Read off the team workspace: **Free plan, 4 concurrent calls, 15 included call minutes**, burst beyond the limit at double the per-minute rate. Four concurrent is enough for the three parallel clinic calls. **The 15 minutes are the real cap**: three rehearsals plus the demo (four calls of roughly a minute each, times four runs) exceed it, so either the plan is upgraded before rehearsals or rehearsals run with `VOICE_MODE=mock` and only the demo goes live. Call queueing holds extra calls instead of rejecting them.
