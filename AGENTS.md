@@ -6,26 +6,31 @@
 
 | Person | GitHub | Owns | Avoid without approval |
 |---|---|---|---|
-| Joyce | `@joyceyouu` | _folder TBD_ | the other two folders |
-| Angela | `@AngelaYue2006` (repo admin) | _folder TBD_ | the other two folders |
-| Michael | `@mike-rao` | _folder TBD_ | the other two folders |
+| Joyce | `@joyceyouu` (Claude Max 20x) | `backend/` — orchestrator, Nemotron, state, SSE, approvals, escalation logic; also `shared/` schemas, fixtures and `tests/scenarios/` | `integrations/`, `frontend/` |
+| Angela | `@AngelaYue2006` (repo admin, Claude Pro) | `frontend/` — Next.js dashboard, owner and contact views, history, demo script and pitch | `backend/`, `integrations/` |
+| Michael | `@mike-rao` (Claude Pro) | `integrations/` — ElevenLabs, Twilio voice and SMS, Google Calendar, Places, Distance Matrix, receptionist and transport simulators | `backend/`, `frontend/` |
 
 Folders: `backend/` (orchestrator, Nemotron, state, SSE), `integrations/` (ElevenLabs, Twilio, Google, simulators), `frontend/` (Next.js dashboard, pitch). `shared/`, `docs/`, `tests/scenarios/` and `.env.example` change only by a PR reviewed by the affected owners. The backend owner coordinates integration.
 
-Fill in the folder column once the team picks, then run, per area:
-`gh issue list --label area:<folder> --json number --jq '.[].number' | xargs -I{} gh issue edit {} --add-assignee <github>`
+Issues are assigned by area label; a reassignment is one `gh issue edit <n> --add-assignee` command and needs no PR.
 
 ## Sessions per person
 
-Each person runs up to three Claude sessions at once, each in its own worktree:
+Plans differ, so the ceilings differ. Every session runs in its own worktree.
 
-| Role | Count | What it does | What it never does |
+| Person | Plan | Sessions | Notes |
 |---|---|---|---|
-| **Builder** | 1–2 | Takes the open issue assigned to its person with the lowest gate, claims it, builds it, runs `scripts/check.sh`, opens the PR. | Touch another person's folder. Comment on issues. Merge. |
-| **Reviewer** | 1 | Reviews PRs from the **other two** accounts in one pass against the issue, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md` and the product rules. Approves and merges, or requests changes with the line and the rule. | Approve its own account's PRs. Rewrite code in the PR. |
-| **Coordinator** | 1, Joyce's account only | Owns the issue list: splits, re-orders, reassigns, writes new issues when a gap appears, keeps `docs/MVP.md` gates honest, tells builders when a dependency merged. | Build. Review. |
+| Joyce | Max 20x | 1 coordinator + 2 builders + 1 reviewer | The reviewer reviews **all** of Angela's and Michael's PRs. |
+| Angela | Pro | 1 builder + 1 reviewer, not both busy at once | The reviewer wakes only when a Joyce PR is ready; otherwise idle. |
+| Michael | Pro | 1 builder + 1 reviewer, not both busy at once | Same. Angela's and Michael's reviewers split Joyce's PRs: Angela takes odd PR numbers, Michael even. |
 
-Two builders per person is the ceiling; a third fights the first two for files. At three people that is at most six builders, three reviewers and one coordinator.
+Pro-plan sessions hit the five-hour usage window fast. Keep them lean: the builder works one issue at a time with mocks first; the reviewer reads the diff and never pulls unless the PR is visual. Use a cheaper model for reviewer sessions. If a Pro account runs out, its reviewer duty passes to the other Pro account for that window and the coordinator says so in chat.
+
+| Role | What it does | What it never does |
+|---|---|---|
+| **Builder** | Takes the open issue assigned to its person with the lowest gate, claims it, builds it, runs `scripts/check.sh`, opens the PR. | Touch another person's folder. Comment on issues. Merge. |
+| **Reviewer** | Reviews PRs from the **other** accounts in one pass against the issue, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md` and the product rules. Approves and merges, or requests changes with the line and the rule. | Approve its own account's PRs. Rewrite code in the PR. |
+| **Coordinator** | Joyce's account only. Owns the issue list: splits, re-orders, reassigns, writes new issues when a gap appears, keeps `docs/MVP.md` gates honest, tells builders when a dependency merged. | Build. Review. |
 
 ## The flow
 
