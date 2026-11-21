@@ -22,6 +22,7 @@ from collections.abc import Iterator
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import Engine
 from sqlalchemy.exc import IntegrityError
@@ -204,9 +205,10 @@ async def chat_completions(request: Request):
         )
 
     started = time.perf_counter()
-    text, last = collect(client.stream_chat(messages))
+    # Non-streaming fallback: Lightning is a blocking HTTP call, so it runs on a worker thread like the webhook work.
+    text, last = await run_in_threadpool(lambda: collect(client.stream_chat(messages)))
     on_first_token(time.perf_counter() - started)
-    on_complete(text)
+    await run_in_threadpool(on_complete, text)
     return JSONResponse(
         {
             "id": (last or {}).get("id", f"chatcmpl-{call_id}"),
