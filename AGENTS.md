@@ -7,8 +7,8 @@
 | Person | GitHub | Owns | Avoid without approval |
 |---|---|---|---|
 | Joyce | `@joyceyouu` (Claude Max 20x) | `backend/` — orchestrator, Nemotron, state, SSE, approvals, escalation logic; also `shared/` schemas, fixtures and `tests/scenarios/` | `integrations/`, `frontend/` |
-| Angela | `@AngelaYue2006` (repo admin, Claude Pro) | `frontend/` — Next.js dashboard, owner and contact views, history, demo script and pitch | `backend/`, `integrations/` |
-| Michael | `@mike-rao` (Claude Pro) | `integrations/` — ElevenLabs, Twilio voice and SMS, Google Calendar, Places, Distance Matrix, receptionist and transport simulators | `backend/`, `frontend/` |
+| Angela | `@AngelaYue2006` (repo admin, Claude Pro) | `integrations/` — ElevenLabs, Twilio voice and SMS, Google Calendar, Places, Distance Matrix, receptionist and transport simulators | `backend/`, `frontend/` |
+| Michael | `@mike-rao` (Claude Pro) | `frontend/` — Next.js dashboard, owner and contact views, history, demo script and pitch | `backend/`, `integrations/` |
 
 Folders: `backend/` (orchestrator, Nemotron, state, SSE), `integrations/` (ElevenLabs, Twilio, Google, simulators), `frontend/` (Next.js dashboard, pitch). `shared/`, `docs/`, `tests/scenarios/` and `.env.example` change only by a PR reviewed by the affected owners. The backend owner coordinates integration.
 
