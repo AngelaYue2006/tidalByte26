@@ -94,6 +94,7 @@ When a rule matters, put it in `tests/scenarios/` or `backend/tests/` so it fail
 ## Process
 
 - **One issue = one PR = one thing**, one to three hours. Branch from `main` only. Merge within the hour it goes green. Never stack on an unmerged PR.
+- **Once per clone:** `git config core.hooksPath .githooks` — the `pre-push` hook refuses pushes to `main` before they leave your machine.
 - **Claiming and opening a PR is one command sequence, every time:**
   1. `gh issue edit <n> --add-assignee @me` — the assignee is the claim; two assignees on one issue means stop and ask the coordinator.
   2. `git worktree add ../lifeline-<n> -b <n>-<slug> main`, then `git commit --allow-empty -m "claim: #<n>"`, push, `gh pr create --draft --base main --title "<Area>: <verb> <what> (#<n>)" --body "Closes #<n>"`.

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Refuses any push that updates main. Enable once per clone:
+#   git config core.hooksPath .githooks
+# Branch protection on GitHub is the real guard; this catches the mistake before it leaves the machine.
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main)
+      echo "pre-push: refusing to push to main. Open a PR instead (see CLAUDE.md, Process)." >&2
+      exit 1 ;;
+  esac
+done
+exit 0
