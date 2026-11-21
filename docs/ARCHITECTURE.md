@@ -1,0 +1,204 @@
+# LifeLine — Architecture and Interface Contracts
+
+> **Status: v1 contracts, agreed 2026-11-21.** Changes go through PR with review by the affected owners. Typed schemas in `shared/` become the source of truth once they exist and match this file.
+
+## System boundaries
+
+```mermaid
+flowchart TD
+    U[Mary or Sarah on the dashboard] -- mic or text --> D[Next.js dashboard]
+    D -- REST: request, approve, offer --> B[FastAPI backend]
+    B -- SSE: live events --> D
+    B --> N1[Nemotron Nano, local via Ollama]
+    B --> N2[NVIDIA API: Lightning, Super]
+    B --> G[Google Calendar, Places, Distance Matrix]
+    B --> E[ElevenLabs Agents]
+    E <--> T[Twilio Voice] <--> C[3 clinic phones, teammates]
+    E -- custom LLM --> B
+    B --> S[Twilio SMS] <--> F[Sarah's phone, Mary's phone]
+    B --> X[Transport simulator]
+    B --> DB[(SQLite: tasks, calls, turns, events, contacts)]
+```
+
+**Authoritative state lives in the backend.** Adapters return observed facts. Models return suggestions that the code validates. The frontend never changes state directly.
+
+## Directory ownership
+
+- `backend/` (Person 1): FastAPI app, orchestrator, Nemotron wrappers, hard rules, state transitions, SQLite, event bus, SSE, approvals, LLM proxy, demo reset, metrics.
+- `integrations/` (Person 2): ElevenLabs, Twilio, Google adapters and the simulators. Pure functions with typed outputs. No database writes; they return facts and the orchestrator records them.
+- `frontend/` (Person 3): Next.js app. `frontend/prototype/` is the static replay demo and the visual spec for every event.
+- `shared/` (review): JSON Schemas for events, task projections and adapter outputs.
+- `tests/` (shared): scenario tests T1–T12.
+
+## Nemotron usage
+
+| Step | Model | Where | Input | Output |
+|---|---|---|---|---|
+| Intake | Nemotron Nano, 4-bit | Laptop, Ollama | Raw utterance, user record | `IntakeRequest` JSON, redacted |
+| Contact message | Nemotron Nano, 4-bit | Laptop, Ollama | Full task record, contact scope | One SMS-length message with only the allowed facts |
+| Call agent | Nemotron 3.5 Lightning | NVIDIA API via backend proxy | Per-call system prompt + conversation | Streamed replies to the receptionist |
+| Rank and explain | Nemotron 3 Super | NVIDIA API | Filtered offers, free windows, distances, priority | `Decision` JSON with score, reasons, trade-off |
+| Call summary | Nemotron 3 Super | NVIDIA API | Call transcript | `CallResult` JSON if the ElevenLabs data collection is missing a field |
+
+Exact model IDs go in `.env` (`NEMOTRON_NANO_TAG`, `NEMOTRON_LIGHTNING_ID`, `NEMOTRON_SUPER_ID`). Do not invent defaults; verify at kickoff. The full rationale for the local model is in `docs/DECISIONS.md`.
+
+## Pipeline (orchestrator.py)
+
+Deterministic, in this order. Each step writes an event; the task status is the step name.
+
+1. `intake` — Nano → `IntakeRequest`. Emit `request`.
+2. `calendar` — `calendar.free_windows()` for the requested range.
+3. `places` — `places.find_clinics()` top 3, then `distance.drive()` from the owner's home. Emit `call_start` ×3 with distance meta.
+4. `calling` — `voice.start_call()` ×3 in parallel. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`.
+5. `ranking` — `ranking.hard_rules()` drops offers over budget, outside free windows, or not insured. `ranker.rank()` (Super) scores the rest. Emit `decision`. If nothing survives, status `failed` with reason, emit `task_updated`, notify both, stop.
+6. `awaiting_approval` — SMS the owner the pick. Emit `approval_required`. Wait for `POST /api/tasks/{id}/approve` or SMS `YES`. Timeout: one reminder, then stay waiting.
+7. `booking` — `voice.confirm_booking()` (a short call-back, or the mock) returns `Confirmation`. Only on `confirmed`: `calendar.create_event()` once, keyed by task id. Emit `booked`. On `tentative`: emit `booked` with `tentative: true` and no calendar event.
+8. `transport` — `transport.check()` → `TransportOptions`. Emit `transport_check`. If available (never in the demo fixture): skip to 10.
+9. `awaiting_contact` — Nano writes the scoped message; `sms.send()` to the contact. Emit `contact_request`. Wait for `POST /api/webhooks/twilio/sms` from the allowlisted number or `POST /api/contacts/offers`. Emit `contact_reply`, then `ride_confirmed` or keep waiting.
+10. `completed` — final SMS to owner and contact. Emit `notified`, `task_updated`.
+
+## Data model (SQLite)
+
+`tasks`: `{id, owner_id, status, intake_json, windows_json, decision_json, booking_json, transport_json, created_at, updated_at}`
+`contacts`: `{id, owner_id, name, phone_e164, relationship, scope}` — scope is `ride_requests` for the MVP.
+`calls`: `{id, task_id, clinic_name, clinic_phone, distance_mi, status, result_json, external_ref, started_at, ended_at}` — `external_ref` is the ElevenLabs conversation id.
+`turns`: `{id, call_id, seq, speaker, text, at}` — speaker is `agent` or `clinic`. Text only.
+`events`: `{id, task_id, type, payload_json, visibility, at}` — visibility `owner`, `contact` or `internal`.
+
+Task statuses: `intake`, `calendar`, `places`, `calling`, `ranking`, `awaiting_approval`, `booking`, `transport`, `awaiting_contact`, `completed`, `failed`, `cancelled`.
+
+Every external side effect (SMS, booking, calendar insert) is keyed by `task_id` plus step name and is skipped if a receipt already exists.
+
+## REST interface (v1)
+
+| Method | Endpoint | Body | Result |
+|---|---|---|---|
+| `POST` | `/api/requests` | `{owner_id, actor_id, text?, audio_b64?, idempotency_key}` | `201 {task_id}`; starts the pipeline |
+| `GET` | `/api/tasks` | `?owner_id&limit` | history, newest first, viewer-scoped |
+| `GET` | `/api/tasks/{id}` | — | task projection for the viewer role |
+| `GET` | `/api/tasks/{id}/events` | — | ordered events filtered by viewer visibility |
+| `POST` | `/api/tasks/{id}/approve` | `{actor_id, decision: "approve" or "reject", idempotency_key}` | owner only |
+| `POST` | `/api/contacts/offers` | `{task_id, contact_id, offer: {can_drive, pickup_time?}, idempotency_key}` | contact's dashboard reply |
+| `GET` | `/api/live` | `?viewer_id` | **SSE**: `snapshot` then events; viewer-scoped |
+| `POST` | `/v1/chat/completions` | OpenAI chat format from ElevenLabs | custom LLM proxy to Lightning; streams; logs turns |
+| `POST` | `/api/webhooks/elevenlabs/post-call` | ElevenLabs payload | transcript + data collection → `call_result` |
+| `POST` | `/api/webhooks/twilio/sms` | Twilio form | signature check, allowlist, match `YES` or contact reply to the open task |
+| `POST` | `/api/demo/reset` | — | `APP_ENV=development` only; clears and reseeds |
+| `GET` | `/api/health` | — | adapter modes and versions, no secrets |
+
+Auth for the hackathon: one shared dashboard session cookie, `viewer_id` chosen on a role picker. Not production identity.
+
+## Live events (SSE) — the dashboard contract
+
+The prototype `frontend/prototype/index.html` renders the first eight exactly as listed. The Next.js app renders all of them.
+
+```text
+{ type: "request", text, chips: [..] }                       // chip starting with "!" renders green
+{ type: "call_start", call_id, clinic, meta }                // meta: "1.2 mi · 6 min"
+{ type: "call_status", call_id, status: "dialing"|"live"|"hold"|"done" }
+{ type: "transcript", call_id, speaker: "agent"|"clinic", text }
+{ type: "call_result", call_id, price, slot, insured, slotOk }
+{ type: "decision", winner, title, reasons: [..], second: [..], tradeoff }
+{ type: "booked", calendar, sms_user, tentative? }
+{ type: "notified", sms_contact, sms_user? }
+{ type: "approval_required", pick: {clinic, slot, price}, expires_at }
+{ type: "approved", by, via: "dashboard"|"sms" }
+{ type: "transport_check", status: "checking"|"unavailable"|"available", reason, simulated: true }
+{ type: "contact_request", contact, message }
+{ type: "contact_reply", contact, text, offer }
+{ type: "ride_confirmed", driver, pickup_time }
+{ type: "task_updated", status }
+{ type: "snapshot", task, calls, events }                    // first message on every (re)connect
+{ type: "heartbeat" }                                        // every 15 s
+```
+
+SSE details: `id:` increases per owner; the client ignores ids already applied. Headers `Cache-Control: no-cache`, `X-Accel-Buffering: no`. `LIVE_STREAM_MODE=poll` makes the dashboard poll `GET /api/tasks/{id}/events` once a second instead.
+
+**Visibility:** `request.text` and the raw intake are `owner` only; the contact view receives `request` with chips but no text. `transcript` events are visible to both roles because the agent only ever speaks redacted facts. `contact_request` and `contact_reply` are visible to both.
+
+## Adapter contracts (integrations/)
+
+```python
+# nemotron (backend/app/nemotron/)
+local_intake.redact(utterance: str, user: UserRecord) -> IntakeRequest
+local_intake.contact_message(task: Task, contact: Contact) -> str
+ranker.rank(offers: list[Offer], windows: list[Window], priority: str) -> Decision
+
+# integrations/
+calendar.free_windows(owner_id, start_iso, end_iso) -> list[Window]
+calendar.create_event(owner_id, booking: Booking, idempotency_key) -> CalendarReceipt
+places.find_clinics(care_type, area, limit=3) -> list[Clinic]          # name, phone_e164, address, lat, lng, place_id
+distance.drive(origin, clinics) -> list[Distance]                      # miles, minutes
+voice.start_call(call: CallSpec) -> CallHandle                         # ElevenLabs outbound via Twilio; CallSpec has clinic, redacted request, windows, call_id
+voice.confirm_booking(call: CallSpec, slot) -> Confirmation            # status: confirmed | tentative | rejected
+sms.send(to_e164, text, idempotency_key) -> MessageReceipt
+sms.parse_inbound(form) -> InboundSms                                  # verified sender, body, correlation
+transport.check(booking: Booking, needs: dict) -> TransportOptions     # fixture: available=False, reason UNAVAILABLE_ACCESSIBLE_RIDE
+```
+
+`IntakeRequest`: `{care_type, budget_max, insurance_carrier, time_range, needs_ride, search_area, dropped_fields: [..]}` — `dropped_fields` names what was removed, for the metrics, never the values.
+`Offer`: `{call_id, clinic, price, slot_start, slot_end, insured, distance_mi, drive_min}`.
+`Decision`: `{winner_call_id, score, reasons: [..], second: [..], tradeoff, ranked: [{call_id, score}]}`.
+`Confirmation`: `{status, confirmation_ref, evidence: "clinic said ..." }`.
+
+## ElevenLabs custom-LLM proxy
+
+ElevenLabs calls `POST /v1/chat/completions` on the tunnel URL with the conversation so far. The proxy: checks the shared secret header, reads `call_id` from the ElevenLabs dynamic variables, builds the system prompt from `prompts.call_agent(call_spec)`, forwards to the NVIDIA API with `NEMOTRON_LIGHTNING_ID` and `stream: true`, relays the stream back, and writes each completed agent and clinic turn to `turns` while emitting `transcript` events. The post-call webhook supplies the final transcript and the data-collection fields (`price`, `slot`, `insured`); if any is missing, Super extracts it from the transcript.
+
+## Invariants
+
+1. The raw utterance is never sent to any network endpoint. Only `IntakeRequest` leaves the device.
+2. No booking and no calendar write before an `approved` event for that task.
+3. A calendar event is created only after a `confirmed` Confirmation, exactly once.
+4. Status and the dashboard chips come from structured results and receipts, never from transcript text.
+5. The contact receives only the fields in their scope; the contact view never receives `owner`-visibility events.
+6. Inbound SMS is acted on only from allowlisted numbers and only while a matching task is waiting.
+7. Repeated webhooks and retries create no duplicate side effects.
+8. Every adapter has a mock mode that emits the same events, labelled `simulated: true` where it matters.
+9. Transcripts are text only. No audio is stored.
+
+## Environment variables (`.env.example`)
+
+```bash
+APP_ENV=development
+APP_TIMEZONE=America/Chicago
+DATABASE_URL=sqlite:///./lifeline.db
+PUBLIC_BASE_URL=            # ngrok https URL for webhooks and the LLM proxy
+LLM_PROXY_SECRET=           # shared with the ElevenLabs agent config
+NVIDIA_API_KEY=
+NEMOTRON_LIGHTNING_ID=      # verify on build.nvidia.com
+NEMOTRON_SUPER_ID=
+OLLAMA_BASE_URL=http://localhost:11434
+NEMOTRON_NANO_TAG=          # 4-bit tag pulled into Ollama
+ELEVENLABS_API_KEY=
+ELEVENLABS_AGENT_ID=
+ELEVENLABS_PHONE_NUMBER_ID= # imported Twilio number
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REFRESH_TOKEN=       # one test account
+GOOGLE_MAPS_API_KEY=        # Places + Distance Matrix
+DEMO_PHONE_ALLOWLIST=       # comma-separated teammate numbers, E.164
+VOICE_MODE=mock             # mock | live
+PLACES_MODE=fixture         # fixture | live
+CALENDAR_MODE=mock          # mock | live
+SMS_MODE=mock               # mock | live
+TRANSPORT_MODE=fixture
+LIVE_STREAM_MODE=sse        # sse | poll
+```
+
+## Error codes
+
+`INTAKE_INCOMPLETE`, `NO_CLINICS_FOUND`, `CALL_FAILED`, `NO_ELIGIBLE_OFFER`, `APPROVAL_TIMEOUT`, `BOOKING_TENTATIVE`, `BOOKING_REJECTED`, `CALENDAR_ERROR`, `TRANSPORT_UNAVAILABLE`, `CONTACT_DECLINED`, `UNVERIFIED_SENDER`, `WEBHOOK_DUPLICATE`. Each produces an event and either a retry, a wait state or `failed`. Never a silent `completed`.
+
+## Integration checkpoints
+
+1. Mock everything → full event sequence on `GET /api/live` → dashboard renders it.
+2. Nano intake on the 20-utterance set → accuracy and latency logged.
+3. One real outbound call to a teammate, Lightning answering through the proxy → transcript and `call_result`.
+4. Three concurrent calls.
+5. Real Calendar insert once; real Places and Distance Matrix.
+6. SMS round trip through the tunnel: approval YES and contact reply.
+7. Two full runs with reset between them.

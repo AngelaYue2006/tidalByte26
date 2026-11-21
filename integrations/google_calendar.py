@@ -1,0 +1,1 @@
+"""Google Calendar. free_windows(owner_id, start, end) via freebusy.query; create_event(owner_id, booking, key) via events.insert: title Appointment, visibility private, reminder 1 day. CALENDAR_MODE=mock uses fixtures/free_windows.json."""

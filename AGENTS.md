@@ -1,25 +1,25 @@
 # LifeLine — Coding-Agent and Team Rules
 
-> Read `README.md`, `docs/MVP.md`, and `docs/ARCHITECTURE.md` before generating code. This file applies to human collaborators and AI coding agents. It is a coordination policy, not autonomous permission to access accounts or contact people.
+> Interim: Joyce will supply an AGENTS.md template and this file will be rewritten to it. Read `README.md`, `docs/DECISIONS.md`, `docs/MVP.md`, and `docs/ARCHITECTURE.md` before generating code. This file applies to human collaborators and AI coding agents. It is a coordination policy, not autonomous permission to access accounts or contact people.
 
 ## Mission and non-goals
 
-Ship **one safe, complete, reproducible MVP**: phone/text request → Nemotron planning → simulated clinic appointment → simulated inaccessible transport → approved family SMS response → verified completion and dashboard (with live call captions and call history). Do not expand scope into real clinical advice, real patient data, unrestricted live booking, or full multi-agent architecture.
+Ship **one safe, complete, reproducible MVP**: dashboard request → local Nemotron Nano redaction → three parallel outbound clinic calls (Nemotron Lightning) → hard rules + Nemotron Super ranking → one approval → booking + calendar → simulated transport check → scoped SMS to the emergency contact → verified completion on the dashboard. Do not expand scope into real clinic calls, real patient data, medical advice or phone-in intake. Decisions are recorded in `docs/DECISIONS.md`.
 
 ## Ownership (replace placeholders with GitHub handles)
 
 | Role | GitHub handle | Owns | Avoid without approval |
 |---|---|---|---|
-| Person 1 — backend/AI | `@BACKEND_HANDLE` | `backend/`, backend tests, state machine, DB, Nemotron | `integrations/`, `frontend/` |
-| Person 2 — voice/services | `@INTEGRATIONS_HANDLE` | `integrations/`, service adapter tests | `backend/`, `frontend/` |
-| Person 3 — frontend/family | `@FRONTEND_HANDLE` | `frontend/`, frontend tests | `backend/`, `integrations/` |
+| Person 1 — backend/AI | `@BACKEND_HANDLE` | `backend/`: orchestrator, Nemotron (Nano, Lightning proxy, Super), hard rules, SQLite, SSE, approvals | `integrations/`, `frontend/` |
+| Person 2 — voice/integrations | `@INTEGRATIONS_HANDLE` | `integrations/`: ElevenLabs, Twilio, Google Calendar/Places/Distance, simulators | `backend/`, `frontend/` |
+| Person 3 — frontend/pitch | `@FRONTEND_HANDLE` | `frontend/`: Next.js dashboard, owner and contact views, history, demo script | `backend/`, `integrations/` |
 | Shared | review required | `shared/`, `docs/ARCHITECTURE.md`, `tests/` integration tests | breaking interfaces without review |
 
 **Backend owner is integration coordinator**, not unilateral decision-maker. Make small PRs, notify affected owners, and merge working vertical slices frequently.
 
 ## Source of truth
 
-- **Why**: `docs/VISION.md`.
+- **Why**: `docs/VISION.md`. **What was decided and why**: `docs/DECISIONS.md`.
 - **What we actually ship**: `docs/MVP.md`.
 - **How components talk**: `docs/ARCHITECTURE.md`.
 - **How to run**: `README.md` (update with real commands once app exists).
@@ -34,7 +34,7 @@ Before coding: read docs, inspect existing code and tests, run quick compatibili
 ### Agent-safe and human-safe rules
 
 - Do not read, print, commit, screenshot or post `.env` secrets, tokens, full call recordings, or private user details.
-- Never call real numbers or send SMS except **allowlisted, consented test contacts**.
+- Never call real numbers or send SMS except **allowlisted, consented test contacts** (`DEMO_PHONE_ALLOWLIST`). Never a real clinic.
 - Never claim a simulated clinic confirmed a real appointment.
 - Do not modify a different owner's files without permission; coordinate shared-schema changes.
 - Do not use model-generated free text as proof of permission or external confirmation.

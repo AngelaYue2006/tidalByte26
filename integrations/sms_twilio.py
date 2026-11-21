@@ -1,0 +1,1 @@
+"""Twilio SMS. send(to, text, idempotency_key) -> MessageReceipt; parse_inbound(form) -> InboundSms with signature validation and DEMO_PHONE_ALLOWLIST check. SMS_MODE=mock writes to the dashboard instead."""
