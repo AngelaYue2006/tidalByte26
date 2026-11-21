@@ -155,3 +155,70 @@ shared types are unchanged; no database writes or backend changes are required.
 Vendor references: [Text Search](https://developers.google.com/maps/documentation/places/web-service/text-search),
 [Place Details](https://developers.google.com/maps/documentation/places/web-service/place-details),
 [computeRoutes](https://developers.google.com/maps/documentation/routes/reference/rest/v2/TopLevel/computeRoutes).
+
+
+## ElevenLabs outbound voice (#26)
+
+`voice_elevenlabs.start_call(CallSpec) -> CallHandle` starts an outbound discovery
+call in `VOICE_MODE=live`. It allowlists the destination before client creation
+and again after read-only settings checks, immediately before the POST. The
+backend must create the task/call rows before dialing (the proxy loads redacted
+context by call_id), store `external_ref` from the returned conversation ID and
+skip calls with a persisted receipt. A vendor acceptance is not a completed call,
+Offer, booking or proof of dashboard delivery. Ambiguous POST failures are not
+retried automatically; reconcile before any resubmission.
+
+The adapter sends clinic name, care type, optional budget/carrier and ISO windows
+as scalar dynamic variables. It sends call_id and LLM_PROXY_SECRET in
+`custom_llm_extra_body`, not dynamic variables. It never sends the owner's record,
+clinic street address, dropped field names/values or raw intake. No model ID is
+hard-coded. The configured agent must use the expected PUBLIC_BASE_URL proxy.
+
+Before every dial, GET checks require the agent's first message to begin with
+`Hi, I'm an AI assistant calling for a patient.`, privacy.record_voice=false,
+Custom LLM extra body enabled, and only transcript/call-failure webhook events.
+The imported number must be Twilio, support outbound calls and be assigned to the
+configured agent. The POST also sets call_recording_enabled=false. Nothing calls
+an audio endpoint or stores audio. No settings are changed automatically. Errors
+omit credentials, vendor messages and bodies; HTTP requests have bounded timeouts
+and no redirects/retries. A changed/incomplete API configuration fails closed.
+Webhook destination/secret correctness still requires the actual signed round
+trip; settings presence alone is not that proof.
+
+`VOICE_MODE=mock` delegates to `voice_mock` once #13 lands, using its existing
+callback lifecycle and backend fixtures. If that separate adapter is not present,
+standalone mock calls fail before network access; main's fixture mock pipeline
+remains usable through its backend fallback. Unknown modes fail. No code from an
+unmerged PR is copied or stacked here.
+
+**Backend work needed:** main's build_deps still rejects VOICE_MODE=live. Joyce
+must wire live starts off the server event loop, persist external_ref, wait for
+the signed webhook's structured results and feed those facts into the pipeline.
+Three starts may run concurrently; the fake-HTTP regression proves no adapter
+serialization. The documented workspace limit is four, but a real three-call
+run and current plan/minute availability have not been verified here.
+
+`confirm_booking(CallSpec, slot) -> Confirmation` retains its signature but fails
+before dialing in live mode. The current proxy prompt explicitly forbids booking
+and its CallSpec has no approved booking intent/slot context. Joyce must add an
+approval-aware booking flow and structured confirmation evidence before this
+adapter can safely implement it; transcript wording is never a confirmation
+receipt. The synchronous backend booking call must also run off the server loop.
+Mock confirmation delegates to #13 and remains explicitly simulated.
+
+Required existing settings: ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID,
+ELEVENLABS_PHONE_NUMBER_ID, ELEVENLABS_WEBHOOK_SECRET, LLM_PROXY_SECRET,
+PUBLIC_BASE_URL, and DEMO_PHONE_ALLOWLIST. `python-dotenv` is declared for the
+read-only helper:
+
+`python -m integrations.elevenlabs_preflight --env-file ../lifeline-6/.env`
+
+The local run reported missing agent ID, phone-number ID and webhook secret.
+No real call was placed, no live transcript/call_result was demonstrated and no
+live booking receipt exists. PR #84 remains draft until account setup (#67),
+backend live/booking support and the issue's live one-call/three-call acceptance
+are complete. Exact tests and preflight outcome are in its body.
+
+Vendor references: [Outbound call](https://elevenlabs.io/docs/api-reference/integrations/twilio/outbound-call),
+[Agent settings](https://elevenlabs.io/docs/api-reference/agents/get),
+[Imported number](https://elevenlabs.io/docs/api-reference/phone-numbers/get).
