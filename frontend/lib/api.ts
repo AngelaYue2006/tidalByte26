@@ -4,6 +4,8 @@
 
 import { apiFetch } from "@/lib/session";
 
+import { VIEWERS } from "./viewer";
+
 function withViewer(path: string, viewerId: string, extra?: Record<string, string>): string {
   const params = new URLSearchParams({ viewer_id: viewerId, ...extra });
   return `${path}?${params.toString()}`;
@@ -11,7 +13,7 @@ function withViewer(path: string, viewerId: string, extra?: Record<string, strin
 
 /** History list URL — viewer-scoped. */
 export function tasksUrl(viewerId: string, limit = 20): string {
-  return withViewer("/api/tasks", viewerId, { limit: String(limit), owner_id: viewerId });
+  return withViewer("/api/tasks", viewerId, { limit: String(limit), owner_id: VIEWERS.owner.viewerId });
 }
 
 /** Single task projection for the current viewer. */

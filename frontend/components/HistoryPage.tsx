@@ -1,9 +1,12 @@
 "use client";
 
+import { workspaceMode } from "@/lib/workspace";
+
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import WorkspaceLink from "./WorkspaceLink";
+import { demoArchive, readDemoRun, elapsedSeconds, demoEnd } from "@/lib/callDemo";
 import HistoryList from "@/components/HistoryList";
-import SceneArt from "@/components/SceneArt";
 import { getTasks } from "@/lib/api";
 import {
   parseTasksPayload,
@@ -19,23 +22,27 @@ function seedTasks(role: "owner" | "contact"): HistoryTask[] {
   return sortNewestFirst(SEEDED_TASKS.map((t) => projectTaskForViewer(t, role)));
 }
 
-/** Loads GET /api/tasks; always shows seeded runs when API is empty or down. */
+/** Demo history is local. Live history is scoped to the selected viewer. */
 export default function HistoryPage() {
   const searchParams = useSearchParams();
   const viewer = viewerFromSearchParams(searchParams);
-  const preview = searchParams.get("preview");
-  const density = searchParams.get("density");
-  const forcePreview = preview === "1";
+
+  const [demoComplete, setDemoComplete] = useState(false);
+  useEffect(() => {
+    const run = readDemoRun();
+    setDemoComplete(Boolean(demoArchive()) || (!!run && elapsedSeconds(run) >= demoEnd));
+  }, []);
+  const forcePreview = workspaceMode(searchParams) !== "live";
 
   // Paint seeds immediately so /history never looks broken while fetch runs.
-  const [tasks, setTasks] = useState<HistoryTask[]>(() => seedTasks(viewer.role));
-  const [simulated, setSimulated] = useState(true);
+  const [tasks, setTasks] = useState<HistoryTask[]>(() => forcePreview ? seedTasks(viewer.role) : []);
+  const [simulated, setSimulated] = useState(forcePreview);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setTasks(seedTasks(viewer.role));
-    setSimulated(true);
+    setTasks(forcePreview ? seedTasks(viewer.role) : []);
+    setSimulated(forcePreview);
 
     async function load() {
       if (forcePreview) {
@@ -51,19 +58,13 @@ export default function HistoryPage() {
           projectTaskForViewer(t, viewer.role),
         );
         if (cancelled) return;
-        if (parsed.length === 0) {
-          setTasks(seedTasks(viewer.role));
-          setSimulated(true);
-          setError(null);
-        } else {
-          setTasks(parsed);
-          setSimulated(false);
-          setError(null);
-        }
+        setTasks(parsed);
+        setSimulated(false);
+        setError(null);
       } catch (err) {
         if (!cancelled) {
-          setTasks(seedTasks(viewer.role));
-          setSimulated(true);
+          setTasks([]);
+          setSimulated(false);
           setError(err instanceof Error ? err.message : "tasks unavailable");
         }
       }
@@ -77,26 +78,16 @@ export default function HistoryPage() {
 
   return (
     <main className="history-page">
-      <header className="page-hero card page-hero-coral">
-        <div className="page-hero-copy">
-          <p className="page-kicker">Past runs</p>
-          <h1 className="history-title">History</h1>
-          <p className="muted history-sub">
-            Everything LifeLine booked for {viewer.name} — tap a run for the full trail.
-          </p>
-          {error && simulated ? (
-            <p className="faint history-api-note">API unreachable — showing demo runs ({error})</p>
-          ) : null}
-        </div>
-        <SceneArt name="family" className="scene-art page-hero-art" />
-      </header>
-      <HistoryList
+      <header className="studio-heading"><div><h1>{viewer.role === "contact" ? "Mary’s history" : "History"}</h1>
+        <p className="muted">Past appointment requests for Mary Johnson.</p></div></header>
+      {error && !forcePreview && <p role="status">Appointment history is unavailable right now.</p>}
+      {forcePreview && demoComplete && <WorkspaceLink className="demo-history-link card" href="/history/demo-cleaning">
+        <strong>Dental cleaning for Mary</strong><span>{viewer.role === "owner" ? "Review simulated calls" : "View simulated appointment activity"}</span>
+      </WorkspaceLink>}
+      {!error && <HistoryList
         items={tasks.map(toListItem)}
-        viewerId={viewer.viewerId}
         simulated={simulated}
-        preview={preview}
-        density={density}
-      />
+      />}
     </main>
   );
 }
