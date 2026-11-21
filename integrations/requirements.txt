@@ -5,3 +5,5 @@ google-auth-oauthlib
 googlemaps
 httpx
 pydantic
+jsonschema
+pytest

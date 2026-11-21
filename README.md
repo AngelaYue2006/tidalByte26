@@ -17,7 +17,8 @@ Mary, 78, taps the microphone on the dashboard: "I need a dental cleaning this w
 3. [docs/MVP.md](docs/MVP.md) — exact demo scope, acceptance criteria, team split, gates, test matrix.
 4. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — pipeline, data model, REST and SSE contracts, adapter signatures, environment variables.
 5. [AGENTS.md](AGENTS.md) — rules for humans and coding agents working in this repo.
-6. [docs/AGENT_BOARD.md](docs/AGENT_BOARD.md) — optional GitHub-issue message board.
+6. [docs/PITCH.md](docs/PITCH.md) — 3-minute demo script, Devpost copy, Nemotron explanation; measured numbers come from backend #25’s metrics summary when it lands.
+7. [docs/AGENT_BOARD.md](docs/AGENT_BOARD.md) — optional GitHub-issue message board.
 
 Archived: `docs/archive/` holds the original Slotted plan and handoff. The LifeLine v0 docs (inbound-call design) are in git history at commit `f09f0a7`.
 
@@ -58,7 +59,7 @@ Fill in exact commands as each module lands. Secrets live in `.env`, never in th
 ## Kickoff checklist
 
 - [ ] Verify NVIDIA model IDs, streaming support, and the API key.
-- [ ] Verify ElevenLabs custom-LLM setup, outbound call API and concurrent-call limit.
+- [x] Verify ElevenLabs custom-LLM setup and outbound call API (`docs/ELEVENLABS.md`); concurrent-call limit still to read off the team account.
 - [ ] Verify all three teammate phones on the Twilio trial; SMS webhook reaches the tunnel.
 - [ ] Google Cloud project: Calendar, Places, Distance Matrix enabled; OAuth test user added.
 - [ ] Ollama running a 4-bit Nemotron Nano on the demo laptop.

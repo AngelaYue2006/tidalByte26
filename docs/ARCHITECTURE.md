@@ -80,13 +80,14 @@ Every external side effect (SMS, booking, calendar insert) is keyed by `task_id`
 | `POST` | `/api/tasks/{id}/approve` | `{actor_id, decision: "approve" or "reject", idempotency_key}` | owner only |
 | `POST` | `/api/contacts/offers` | `{task_id, contact_id, offer: {can_drive, pickup_time?}, idempotency_key}` | contact's dashboard reply |
 | `GET` | `/api/live` | `?viewer_id` | **SSE**: `snapshot` then events; viewer-scoped |
+| `GET` | `/api/session` | — | sets the `lifeline_session` cookie; the dashboard calls it once before any read |
 | `POST` | `/v1/chat/completions` | OpenAI chat format from ElevenLabs | custom LLM proxy to Lightning; streams; logs turns |
 | `POST` | `/api/webhooks/elevenlabs/post-call` | ElevenLabs payload | transcript + data collection → `call_result` |
 | `POST` | `/api/webhooks/twilio/sms` | Twilio form | signature check, allowlist, match `YES` or contact reply to the open task |
 | `POST` | `/api/demo/reset` | — | `APP_ENV=development` only; clears and reseeds |
 | `GET` | `/api/health` | — | adapter modes and versions, no secrets |
 
-Auth for the hackathon: one shared dashboard session cookie, `viewer_id` chosen on a role picker. Not production identity.
+Auth for the hackathon: one shared dashboard session cookie, `viewer_id` chosen on a role picker. Not production identity. `GET /api/session` issues `lifeline_session`, an HMAC-signed token under `DASHBOARD_SESSION_SECRET` (HttpOnly, SameSite=Lax); `GET /api/live` and `GET /api/tasks/{id}/events` answer 401 without a valid one. In development with no secret set the app signs with a random per-process secret.
 
 ## Live events (SSE) — the dashboard contract
 
@@ -112,9 +113,9 @@ The prototype `frontend/prototype/index.html` renders the first eight exactly as
 { type: "heartbeat" }                                        // every 15 s
 ```
 
-SSE details: `id:` increases per owner; the client ignores ids already applied. Headers `Cache-Control: no-cache`, `X-Accel-Buffering: no`. `LIVE_STREAM_MODE=poll` makes the dashboard poll `GET /api/tasks/{id}/events` once a second instead.
+SSE details: `id:` is the events-table id and increases per owner; the `snapshot` carries the id of the last event it contains; the client ignores ids already applied. Headers `Cache-Control: no-cache`, `X-Accel-Buffering: no`. `LIVE_STREAM_MODE=poll` makes the dashboard poll `GET /api/tasks/{id}/events` once a second instead.
 
-**Visibility:** `request.text` and the raw intake are `owner` only; the contact view receives `request` with chips but no text. `transcript` events are visible to both roles because the agent only ever speaks redacted facts. `contact_request` and `contact_reply` are visible to both.
+**Visibility:** an event's `visibility` is `owner` (the owner only), `contact` (both roles) or `internal` (no dashboard). A viewer whose id is a row in `contacts` is that owner's contact; any other viewer id is an owner and sees its own tasks. `request.text` and the raw intake are `owner` only: the `request` event is emitted with `contact` visibility and the backend strips `text` for the contact viewer, so the contact view receives `request` with chips but no text. `transcript` events are visible to both roles because the agent only ever speaks redacted facts. `contact_request` and `contact_reply` are visible to both.
 
 ## Adapter contracts (integrations/)
 
@@ -143,7 +144,7 @@ transport.check(booking: Booking, needs: dict) -> TransportOptions     # fixture
 
 ## ElevenLabs custom-LLM proxy
 
-ElevenLabs calls `POST /v1/chat/completions` on the tunnel URL with the conversation so far. The proxy: checks the shared secret header, reads `call_id` from the ElevenLabs dynamic variables, builds the system prompt from `prompts.call_agent(call_spec)`, forwards to the NVIDIA API with `NEMOTRON_LIGHTNING_ID` and `stream: true`, relays the stream back, and writes each completed agent and clinic turn to `turns` while emitting `transcript` events. The post-call webhook supplies the final transcript and the data-collection fields (`price`, `slot`, `insured`); if any is missing, Super extracts it from the transcript.
+ElevenLabs calls `POST /v1/chat/completions` on the tunnel URL with the conversation so far. The proxy: checks `elevenlabs_extra_body.proxy_secret` against `LLM_PROXY_SECRET`, reads `call_id` from the same `elevenlabs_extra_body` (set per call as `custom_llm_extra_body` at call start; dynamic variables do not reach the proxy, they come back in the post-call webhook), builds the system prompt from `prompts.call_agent(call_spec)`, forwards to the NVIDIA API with `NEMOTRON_LIGHTNING_ID` and `stream: true`, relays the stream back, and writes each completed agent and clinic turn to `turns` while emitting `transcript` events. The post-call webhook supplies the final transcript and the data-collection fields (`price`, `slot`, `insured`); if any is missing, Super extracts it from the transcript. The webhook is verified with `ELEVENLABS_WEBHOOK_SECRET` (`ElevenLabs-Signature` header) before anything is read. Verified field names: [`docs/ELEVENLABS.md`](ELEVENLABS.md).
 
 ## Invariants
 
@@ -165,6 +166,7 @@ APP_TIMEZONE=America/Chicago
 DATABASE_URL=sqlite:///./lifeline.db
 PUBLIC_BASE_URL=            # ngrok https URL for webhooks and the LLM proxy
 LLM_PROXY_SECRET=           # shared with the ElevenLabs agent config
+DASHBOARD_SESSION_SECRET=   # signs the lifeline_session cookie; random per process in development when empty
 NVIDIA_API_KEY=
 NEMOTRON_LIGHTNING_ID=      # verify on build.nvidia.com
 NEMOTRON_SUPER_ID=
@@ -173,6 +175,7 @@ NEMOTRON_NANO_TAG=          # 4-bit tag pulled into Ollama
 ELEVENLABS_API_KEY=
 ELEVENLABS_AGENT_ID=
 ELEVENLABS_PHONE_NUMBER_ID= # imported Twilio number
+ELEVENLABS_WEBHOOK_SECRET=  # verifies ElevenLabs-Signature on the post-call webhook
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_PHONE_NUMBER=
