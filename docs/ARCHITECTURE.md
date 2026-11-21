@@ -80,13 +80,14 @@ Every external side effect (SMS, booking, calendar insert) is keyed by `task_id`
 | `POST` | `/api/tasks/{id}/approve` | `{actor_id, decision: "approve" or "reject", idempotency_key}` | owner only |
 | `POST` | `/api/contacts/offers` | `{task_id, contact_id, offer: {can_drive, pickup_time?}, idempotency_key}` | contact's dashboard reply |
 | `GET` | `/api/live` | `?viewer_id` | **SSE**: `snapshot` then events; viewer-scoped |
+| `GET` | `/api/session` | — | sets the `lifeline_session` cookie; the dashboard calls it once before any read |
 | `POST` | `/v1/chat/completions` | OpenAI chat format from ElevenLabs | custom LLM proxy to Lightning; streams; logs turns |
 | `POST` | `/api/webhooks/elevenlabs/post-call` | ElevenLabs payload | transcript + data collection → `call_result` |
 | `POST` | `/api/webhooks/twilio/sms` | Twilio form | signature check, allowlist, match `YES` or contact reply to the open task |
 | `POST` | `/api/demo/reset` | — | `APP_ENV=development` only; clears and reseeds |
 | `GET` | `/api/health` | — | adapter modes and versions, no secrets |
 
-Auth for the hackathon: one shared dashboard session cookie, `viewer_id` chosen on a role picker. Not production identity.
+Auth for the hackathon: one shared dashboard session cookie, `viewer_id` chosen on a role picker. Not production identity. `GET /api/session` issues `lifeline_session`, an HMAC-signed token under `DASHBOARD_SESSION_SECRET` (HttpOnly, SameSite=Lax); `GET /api/live` and `GET /api/tasks/{id}/events` answer 401 without a valid one. In development with no secret set the app signs with a random per-process secret.
 
 ## Live events (SSE) — the dashboard contract
 
@@ -112,9 +113,9 @@ The prototype `frontend/prototype/index.html` renders the first eight exactly as
 { type: "heartbeat" }                                        // every 15 s
 ```
 
-SSE details: `id:` increases per owner; the client ignores ids already applied. Headers `Cache-Control: no-cache`, `X-Accel-Buffering: no`. `LIVE_STREAM_MODE=poll` makes the dashboard poll `GET /api/tasks/{id}/events` once a second instead.
+SSE details: `id:` is the events-table id and increases per owner; the `snapshot` carries the id of the last event it contains; the client ignores ids already applied. Headers `Cache-Control: no-cache`, `X-Accel-Buffering: no`. `LIVE_STREAM_MODE=poll` makes the dashboard poll `GET /api/tasks/{id}/events` once a second instead.
 
-**Visibility:** `request.text` and the raw intake are `owner` only; the contact view receives `request` with chips but no text. `transcript` events are visible to both roles because the agent only ever speaks redacted facts. `contact_request` and `contact_reply` are visible to both.
+**Visibility:** an event's `visibility` is `owner` (the owner only), `contact` (both roles) or `internal` (no dashboard). A viewer whose id is a row in `contacts` is that owner's contact; any other viewer id is an owner and sees its own tasks. `request.text` and the raw intake are `owner` only: the `request` event is emitted with `contact` visibility and the backend strips `text` for the contact viewer, so the contact view receives `request` with chips but no text. `transcript` events are visible to both roles because the agent only ever speaks redacted facts. `contact_request` and `contact_reply` are visible to both.
 
 ## Adapter contracts (integrations/)
 
@@ -165,6 +166,7 @@ APP_TIMEZONE=America/Chicago
 DATABASE_URL=sqlite:///./lifeline.db
 PUBLIC_BASE_URL=            # ngrok https URL for webhooks and the LLM proxy
 LLM_PROXY_SECRET=           # shared with the ElevenLabs agent config
+DASHBOARD_SESSION_SECRET=   # signs the lifeline_session cookie; random per process in development when empty
 NVIDIA_API_KEY=
 NEMOTRON_LIGHTNING_ID=      # verify on build.nvidia.com
 NEMOTRON_SUPER_ID=

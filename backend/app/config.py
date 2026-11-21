@@ -56,6 +56,7 @@ class Settings(BaseModel):
     database_url: str = "sqlite:///./lifeline.db"
     public_base_url: str | None = None
     llm_proxy_secret: str | None = None
+    dashboard_session_secret: str | None = None
 
     nvidia_api_key: str | None = None
     nemotron_lightning_id: str | None = None
@@ -125,15 +126,15 @@ class Settings(BaseModel):
         model ID must be set before the app may start.
         """
         missing: list[str] = []
+        if not self.is_development and not self.dashboard_session_secret:
+            missing.append("DASHBOARD_SESSION_SECRET")
         if self.any_live:
             missing += [name for name in MODEL_IDS.values() if not getattr(self, name.lower())]
         for adapter, needed in LIVE_REQUIREMENTS.items():
             if self.modes[adapter] == "live":
                 missing += [name for name in needed if not getattr(self, name.lower())]
         if missing:
-            raise MissingSetting(
-                "live mode needs values that are empty in .env: " + ", ".join(dict.fromkeys(missing))
-            )
+            raise MissingSetting("startup needs values that are empty in .env: " + ", ".join(dict.fromkeys(missing)))
 
 
 def _env(name: str, env: dict[str, str]) -> str | None:

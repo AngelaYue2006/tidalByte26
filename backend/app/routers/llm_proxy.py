@@ -4,8 +4,8 @@ Correction verified in #6 (docs/ELEVENLABS.md): `call_id` and the secret arrive 
 in the request body (what the voice adapter passed as `custom_llm_extra_body` when it started the call),
 not in dynamic variables. The `Authorization: Bearer` header is accepted for the same secret as a fallback.
 
-Transcript events wait for app.events (#9) and are wired here once it lands. First-token latency is one
-`call_agent` row in metrics.jsonl per proxy turn (app.metrics.record_first_token).
+Every recorded turn is one `transcript` event with `contact` visibility (both roles see the agent speak only
+redacted facts). First-token latency is one `call_agent` row in metrics.jsonl per proxy turn.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from sqlmodel import func, select
 from app import metrics
 from app.config import MissingSetting, Settings
 from app.db import session_scope
+from app.events import EventBus, emit
 from app.models import Call, Task, Turn
 from app.nemotron.call_agent import (
     ChatStream,
@@ -101,10 +102,12 @@ def last_clinic_line(messages: list[dict]) -> str | None:
     return None
 
 
-def record_turn(engine: Engine, call_id: str, speaker: str, text: str) -> Turn | None:
-    """Append one turn unless this speaker's last stored line is the same (ElevenLabs resends the whole conversation each turn and retries on slow replies)."""
+def record_turn(engine: Engine, bus: EventBus, spec: CallSpec, speaker: str, text: str) -> Turn | None:
+    """Append one turn and emit its transcript event, unless this speaker's last stored line is the same
+    (ElevenLabs resends the whole conversation each turn and retries on slow replies)."""
     if not text:
         return None
+    call_id = spec.call_id
     with session_scope(engine) as session:
         last = session.exec(
             select(Turn).where(Turn.call_id == call_id, Turn.speaker == speaker).order_by(Turn.seq.desc())
@@ -117,7 +120,8 @@ def record_turn(engine: Engine, call_id: str, speaker: str, text: str) -> Turn |
         session.flush()
         session.refresh(turn)
         session.expunge(turn)
-        return turn
+    emit(engine, bus, spec.task_id, "transcript", {"call_id": call_id, "speaker": speaker, "text": text}, visibility="contact")
+    return turn
 
 
 def record_first_token(request: Request, call_id: str, seconds: float) -> None:
@@ -159,7 +163,8 @@ async def chat_completions(request: Request):
     call_id = extract_call_id(body)
     spec = load_spec(engine, call_id)
     incoming = body.get("messages") if isinstance(body.get("messages"), list) else []
-    record_turn(engine, call_id, "clinic", last_clinic_line(incoming) or "")
+    bus: EventBus = request.app.state.bus
+    record_turn(engine, bus, spec, "clinic", last_clinic_line(incoming) or "")
     messages = build_messages(spec, incoming)  # elevenlabs_extra_body and the vendor system prompt never go upstream
     client = lightning_client(request)
 
@@ -167,7 +172,7 @@ async def chat_completions(request: Request):
         record_first_token(request, call_id, seconds)
 
     def on_complete(text: str) -> None:
-        record_turn(engine, call_id, "agent", text)
+        record_turn(engine, bus, spec, "agent", text)
 
     if body.get("stream", True):
         chunks: Iterator[dict] = client.stream_chat(messages)

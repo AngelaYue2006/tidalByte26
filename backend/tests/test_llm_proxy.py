@@ -6,8 +6,9 @@ from datetime import UTC, datetime
 import pytest
 from app.config import load_settings
 from app.db import session_scope
+from app.events import Viewer, list_events
 from app.main import create_app
-from app.models import Call, Task, Turn
+from app.models import Call, Contact, Event, Task, Turn
 from app.nemotron.call_agent import LightningClient, build_messages, delta_text, relay
 from app.nemotron.prompts import OPENING_LINE, call_agent, window_label
 from app.nemotron.types import CallSpec
@@ -99,6 +100,7 @@ def client(app):
         with session_scope(app.state.engine) as s:
             s.add(Task(id="task-1", owner_id="mary", status="calling", intake_json=json.dumps(INTAKE), windows_json=json.dumps(WINDOWS)))
             s.add(Call(id="call-a", task_id="task-1", clinic_name="Bright Smile Dental", clinic_phone="+15555550111", status="live"))
+            s.add(Contact(id="sarah", owner_id="mary", name="Sarah Johnson", phone_e164="+15555550101", relationship="daughter"))
         yield c
 
 
@@ -184,6 +186,30 @@ def test_turns_are_written_for_clinic_and_agent(client, app):
     ]
 
 
+def test_each_turn_is_one_transcript_event_both_roles_can_see(client, app):
+    from pathlib import Path
+
+    from jsonschema import Draft202012Validator, FormatChecker
+    from referencing import Registry, Resource
+
+    client.post("/v1/chat/completions", json=body())
+    shared = Path(__file__).resolve().parents[2] / "shared"
+    schemas = [json.loads((shared / n).read_text()) for n in ("events.schema.json", "intake_request.schema.json", "decision.schema.json", "task.schema.json")]
+    validator = Draft202012Validator(schemas[0], registry=Registry().with_resources([(s["$id"], Resource.from_contents(s)) for s in schemas]), format_checker=FormatChecker())
+    with session_scope(app.state.engine) as s:
+        rows = s.exec(select(Event).where(Event.task_id == "task-1").order_by(Event.id)).all()
+        assert [(r.type, r.visibility) for r in rows] == [("transcript", "contact"), ("transcript", "contact")]
+        for role in ("owner", "contact"):
+            events = list_events(s, "task-1", Viewer(id="x", role=role, owner_id="mary"))
+            assert [(e["speaker"], e["text"]) for e in events] == [
+                ("clinic", "Yes, we do. A cleaning is $95 with Delta."),
+                ("agent", "Yes. Do you take Delta Dental?"),
+            ]
+            for e in events:
+                assert e["call_id"] == "call-a"
+                validator.validate({k: v for k, v in e.items() if k != "id"})
+
+
 def test_resent_conversation_does_not_duplicate_the_clinic_turn(client, app):
     client.post("/v1/chat/completions", json=body())
     client.post("/v1/chat/completions", json=body())  # ElevenLabs retry with the same history and the same reply
@@ -199,6 +225,8 @@ def test_resent_conversation_does_not_duplicate_the_clinic_turn(client, app):
         ("clinic", "Thursday at 9:30 is open."),
         ("agent", "Thursday works."),
     ]
+    with session_scope(app.state.engine) as s:
+        assert s.exec(select(Event).where(Event.type == "transcript")).all().__len__() == 4  # one event per turn, none for the resend
 
 
 def test_first_turn_without_a_clinic_line_writes_only_the_agent(client, app):
