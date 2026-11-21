@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from harness import CONTACT, CONTACT_PHONE, OWNER_PHONE, Lab
 
 
@@ -38,23 +37,39 @@ def test_t12_two_runs_in_a_row_both_complete_and_both_show_in_history(lab: Lab):
     lab.validate_trail(second)
 
 
-@pytest.mark.xfail(reason="#24 (PR #82): POST /api/demo/reset is not merged yet", strict=False)
-def test_t12_reset_clears_the_runs_and_reseeds_so_a_third_run_works(lab_factory):
+def test_t12_reset_clears_the_runs_reseeds_two_past_runs_and_a_third_run_works(lab_factory):
     lab: Lab = lab_factory()
     first = full_run(lab)
-    full_run(lab)
+    second = full_run(lab)
 
     r = lab.reset()
     assert r.status_code == 200, r.text
-    assert lab.history(owner_id="mary") == []
-    assert lab.client.get(f"/api/tasks/{first}?viewer_id=mary").status_code == 404
-    _, snap = lab.snapshot()
-    assert snap["task"] is None and snap["events"] == []
+    body = r.json()
+    assert body["stopped"] == 0 and body["seeded"] == {"tasks": 2, "contacts": 1}
+    assert body["cleared"]["tasks"] == 2 and body["cleared"]["calls"] == 6 and body["cleared"]["receipts"] > 0
+    for old in (first, second):
+        assert lab.client.get(f"/api/tasks/{old}?viewer_id=mary").status_code == 404, "the runs are gone"
+        assert lab.client.get(f"/api/tasks/{old}/events?viewer_id=mary").status_code == 404
 
-    third = full_run(lab)  # the fixtures are back: owner, contact, clinics, windows
-    assert [t["id"] for t in lab.history(owner_id="mary")] == [third]
-    assert [t["id"] for t in lab.history(CONTACT, owner_id="mary")] == [third], "the contact row was reseeded"
+    # the history page shows the two seeded past runs, newest first, finished and simulated
+    seeded = lab.history(owner_id="mary")
+    assert len(seeded) == 2 and all(t["status"] == "completed" for t in seeded)
+    assert seeded[0]["created_at"] > seeded[1]["created_at"]
+    assert all(t["id"] not in (first, second) for t in seeded)
+    assert [t["id"] for t in lab.history(CONTACT, owner_id="mary")] == [t["id"] for t in seeded], "the contact row was reseeded"
+    assert all("request_text" not in t for t in lab.history(CONTACT, owner_id="mary"))
+    for task in seeded:
+        assert all(e.get("simulated", True) for e in lab.events(task["id"]) if e["type"] in ("call_result", "transport_check", "booked"))
+        lab.validate_trail(task["id"])
+    _, snap = lab.snapshot()
+    assert snap["task"]["id"] == seeded[0]["id"], "a refresh after reset shows the newest seeded run"
+
+    # the demo runs again from the reseeded state
+    third = full_run(lab)
+    history = lab.history(owner_id="mary")
+    assert history[0]["id"] == third and len(history) == 3
+    assert lab.reset().json()["cleared"]["tasks"] == 3
 
     # reset is a development-only switch
     other = lab_factory(env={"APP_ENV": "staging", "DASHBOARD_SESSION_SECRET": "scenario-session-secret-0123456789"})
-    assert other.reset().status_code in (403, 404)
+    assert other.reset().status_code == 403 and other.history(owner_id="mary") == [], "nothing seeded outside development"

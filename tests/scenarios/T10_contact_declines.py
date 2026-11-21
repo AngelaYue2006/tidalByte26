@@ -45,6 +45,10 @@ def test_t10_sms_no_keeps_waiting_and_a_later_yes_confirms(lab: Lab):
     assert lab.task(task_id)["status"] == "awaiting_contact"
     reply = lab.of_type(task_id, "contact_reply")[-1]
     assert reply["offer"]["can_drive"] is False and "ride_confirmed" not in lab.types(task_id)
+    # the owner is told in their own view; the contact's view carries the reply, not the owner's note
+    declined = [e for e in lab.of_type(task_id, "task_updated") if e.get("reason") == "CONTACT_DECLINED"]
+    assert len(declined) == 1 and declined[0]["visibility"] == "owner" and declined[0]["status"] == "awaiting_contact"
+    assert not [e for e in lab.of_type(task_id, "task_updated", CONTACT) if e.get("reason") == "CONTACT_DECLINED"]
 
     assert lab.twilio_sms(CONTACT_PHONE, "YES", "SM-t10-yes").status_code == 200
     lab.wait_for(task_id, "completed")

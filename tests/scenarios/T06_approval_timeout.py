@@ -10,12 +10,18 @@ from app import orchestrator
 from harness import DEMO_NOW, OWNER_PHONE, Lab
 
 
+def approval_window(lab: Lab) -> timedelta:
+    """How long the owner has: Pipeline.approval_timeout_s once #22 merges (from APPROVAL_TIMEOUT_MIN), the module constant before."""
+    seconds = getattr(lab.app.state.pipeline, "approval_timeout_s", None)
+    return timedelta(seconds=seconds) if seconds is not None else orchestrator.APPROVAL_WINDOW
+
+
 def test_t6_nothing_is_booked_while_the_owner_has_not_answered(lab: Lab):
     task_id = lab.start()
     lab.wait_for(task_id, "awaiting_approval")
     pick = lab.of_type(task_id, "approval_required")[0]
     assert pick["pick"] == {"clinic": "Bright Smile Dental", "slot": "Thu 9:30", "price": "$95"}
-    assert pick["expires_at"] == (DEMO_NOW + orchestrator.APPROVAL_WINDOW).isoformat()
+    assert pick["expires_at"] == (DEMO_NOW + approval_window(lab)).isoformat()
 
     lab.settle(0.5)
     assert lab.task(task_id)["status"] == "awaiting_approval"
@@ -30,8 +36,8 @@ def test_t6_nothing_is_booked_while_the_owner_has_not_answered(lab: Lab):
 
 
 @pytest.mark.xfail(reason="#22 (PR #80): one reminder SMS on approval timeout is not merged yet", strict=False)
-def test_t6_timeout_sends_one_reminder_and_keeps_waiting(lab: Lab, monkeypatch):
-    monkeypatch.setattr(orchestrator, "APPROVAL_WINDOW", timedelta(milliseconds=100))
+def test_t6_timeout_sends_one_reminder_and_keeps_waiting(lab: Lab):
+    lab.app.state.pipeline.approval_timeout_s = 0.3  # read when the next task enters awaiting_approval (#22)
     task_id = lab.start()
     lab.wait_for(task_id, "awaiting_approval")
 

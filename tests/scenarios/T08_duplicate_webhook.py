@@ -65,6 +65,7 @@ def test_t8_repeated_twilio_yes_books_once(lab: Lab):
     first = lab.twilio_sms(OWNER_PHONE, "YES", "SM-t8-yes")
     retry = lab.twilio_sms(OWNER_PHONE, "YES", "SM-t8-yes")  # Twilio retries the same MessageSid
     assert first.status_code == 200 and retry.status_code == 200, "Twilio must always get a 2xx"
+    assert first.headers["content-type"].startswith("text/xml") and "<Response" in first.text
     lab.wait_for(task_id, "awaiting_contact")
     approved = lab.of_type(task_id, "approved")
     assert len(approved) == 1 and approved[0]["via"] == "sms"
