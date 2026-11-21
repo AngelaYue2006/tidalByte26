@@ -29,14 +29,17 @@ async function parseJson<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** History list — viewer-scoped. Shape: Task[] or { tasks: Task[] }. */
 export async function getTasks(viewerId: string, limit = 20): Promise<unknown> {
   return parseJson(await fetch(tasksUrl(viewerId, limit)));
 }
 
+/** Single task projection for the current viewer. */
 export async function getTask(taskId: string, viewerId: string): Promise<unknown> {
   return parseJson(await fetch(taskUrl(taskId, viewerId)));
 }
 
+/** Ordered events for a task, filtered by viewer visibility. */
 export async function getEvents(taskId: string, viewerId: string): Promise<unknown> {
   return parseJson(await fetch(taskEventsUrl(taskId, viewerId)));
 }

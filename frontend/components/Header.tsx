@@ -21,7 +21,10 @@ function NavLinks() {
       <Link href={liveHref} aria-current={pathname === "/" ? "page" : undefined}>
         Live
       </Link>
-      <Link href={historyHref} aria-current={pathname === "/history" ? "page" : undefined}>
+      <Link
+        href={historyHref}
+        aria-current={pathname === "/history" || pathname.startsWith("/history/") ? "page" : undefined}
+      >
         History
       </Link>
     </>
