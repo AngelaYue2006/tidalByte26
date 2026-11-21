@@ -1,1 +1,43 @@
-{}
+{
+  "_note": "Synthetic clinics for PLACES_MODE=fixture. Phones are reserved fictional 555-01xx numbers; distances are from the owner's home in users.json.",
+  "care_type": "dental cleaning",
+  "search_area": "Chicago, IL",
+  "clinics": [
+    {
+      "id": "bright_smile",
+      "name": "Bright Smile Dental",
+      "phone_e164": "+15555550111",
+      "address": "123 Main St, Chicago, IL 60601",
+      "lat": 41.8925,
+      "lng": -87.6240,
+      "place_id": "fixture-bright-smile",
+      "distance_mi": 1.2,
+      "drive_min": 6,
+      "accepts_insurance": ["Delta Dental"]
+    },
+    {
+      "id": "smile_co",
+      "name": "Smile Co.",
+      "phone_e164": "+15555550112",
+      "address": "45 Oak Avenue, Chicago, IL 60601",
+      "lat": 41.8810,
+      "lng": -87.6418,
+      "place_id": "fixture-smile-co",
+      "distance_mi": 0.6,
+      "drive_min": 4,
+      "accepts_insurance": ["Delta Dental"]
+    },
+    {
+      "id": "oak_dental",
+      "name": "Oak Dental",
+      "phone_e164": "+15555550113",
+      "address": "900 Elm Road, Chicago, IL 60614",
+      "lat": 41.9270,
+      "lng": -87.6490,
+      "place_id": "fixture-oak-dental",
+      "distance_mi": 3.4,
+      "drive_min": 14,
+      "accepts_insurance": ["Delta Dental"]
+    }
+  ]
+}

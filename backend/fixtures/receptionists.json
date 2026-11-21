@@ -1,1 +1,80 @@
-{}
+{
+  "_note": "Scripted receptionists for VOICE_MODE=mock, keyed by clinic id from clinics.json. Lines reproduce the prototype SCENARIO; at_ms is time since the call started. result is the structured call_result; status and chips come from it, never from the lines.",
+  "simulated": true,
+  "receptionists": [
+    {
+      "clinic_id": "bright_smile",
+      "status_changes": [
+        { "at_ms": 0, "status": "dialing" },
+        { "at_ms": 1400, "status": "live" },
+        { "at_ms": 10100, "status": "done" }
+      ],
+      "lines": [
+        { "at_ms": 1800, "speaker": "agent", "text": "Hi, I'm an AI assistant calling for a patient. Do you take Delta Dental?" },
+        { "at_ms": 4400, "speaker": "clinic", "text": "Yes, we do. A cleaning is $95 with Delta." },
+        { "at_ms": 6400, "speaker": "agent", "text": "Great. Anything Tuesday afternoon or Thursday morning?" },
+        { "at_ms": 8600, "speaker": "clinic", "text": "Thursday at 9:30 is open." },
+        { "at_ms": 9400, "speaker": "agent", "text": "Perfect, please hold that for Mary Johnson. Thank you!" }
+      ],
+      "result": {
+        "price_usd": 95,
+        "slot_label": "Thu 9:30",
+        "slot_start": "2026-11-26T09:30:00-06:00",
+        "slot_end": "2026-11-26T10:30:00-06:00",
+        "insured": true
+      },
+      "booking_reply": {
+        "status": "confirmed",
+        "evidence": "Clinic said: You're all set for Thursday at 9:30."
+      }
+    },
+    {
+      "clinic_id": "smile_co",
+      "status_changes": [
+        { "at_ms": 0, "status": "dialing" },
+        { "at_ms": 1600, "status": "live" },
+        { "at_ms": 7700, "status": "done" }
+      ],
+      "lines": [
+        { "at_ms": 2300, "speaker": "agent", "text": "Hi, I'm an AI assistant calling for a patient. Any cleanings open this week?" },
+        { "at_ms": 5100, "speaker": "clinic", "text": "Our next opening is Friday at 4. It's $120 with Delta." },
+        { "at_ms": 7100, "speaker": "agent", "text": "Thanks, I'll check with the patient and call back." }
+      ],
+      "result": {
+        "price_usd": 120,
+        "slot_label": "Fri 4:00",
+        "slot_start": "2026-11-27T16:00:00-06:00",
+        "slot_end": "2026-11-27T17:00:00-06:00",
+        "insured": true
+      },
+      "booking_reply": {
+        "status": "confirmed",
+        "evidence": "Clinic said: Friday at 4 is booked."
+      }
+    },
+    {
+      "clinic_id": "oak_dental",
+      "status_changes": [
+        { "at_ms": 0, "status": "dialing" },
+        { "at_ms": 1900, "status": "hold" },
+        { "at_ms": 10200, "status": "live" },
+        { "at_ms": 11500, "status": "done" }
+      ],
+      "lines": [
+        { "at_ms": 2400, "speaker": "clinic", "text": "Thanks for calling Oak Dental, please hold…" },
+        { "at_ms": 10400, "speaker": "clinic", "text": "Sorry for the wait. We're $140, earliest is next Monday." }
+      ],
+      "result": {
+        "price_usd": 140,
+        "slot_label": "Mon 10:00",
+        "slot_start": "2026-11-30T10:00:00-06:00",
+        "slot_end": "2026-11-30T11:00:00-06:00",
+        "insured": true
+      },
+      "booking_reply": {
+        "status": "tentative",
+        "evidence": "Clinic said: We'll call back to confirm."
+      }
+    }
+  ]
+}

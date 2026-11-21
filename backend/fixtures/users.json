@@ -1,1 +1,31 @@
-{}
+{
+  "_note": "Synthetic people only. Phone numbers use the reserved fictional 555-01xx range and are never dialed; real teammate numbers live only in .env DEMO_PHONE_ALLOWLIST.",
+  "owner": {
+    "id": "mary",
+    "name": "Mary Johnson",
+    "role": "owner",
+    "phone_e164": "+15555550100",
+    "dob": "1948-03-14",
+    "timezone": "America/Chicago",
+    "home": {
+      "address": "100 Example Street, Chicago, IL 60601",
+      "lat": 41.8842,
+      "lng": -87.6324
+    },
+    "insurance": {
+      "carrier": "Delta Dental",
+      "member_id": "DEMO-0000-0000-0001"
+    }
+  },
+  "contacts": [
+    {
+      "id": "sarah",
+      "owner_id": "mary",
+      "name": "Sarah Johnson",
+      "role": "contact",
+      "relationship": "daughter",
+      "phone_e164": "+15555550101",
+      "scope": "ride_requests"
+    }
+  ]
+}
