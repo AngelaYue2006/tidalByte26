@@ -13,10 +13,12 @@ import pytest
 from app.adapters import Deps, VoiceMockBridge
 from app.config import load_settings
 from app.main import create_app
+from app.models import Call, Turn
 from app.orchestrator import booking_record
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
+from sqlmodel import Session, select
 
 from integrations.types import Booking
 from tests.stand_ins import DEMO_TEXT, FakeNano, FakeSuper, instant
@@ -467,3 +469,24 @@ def test_refused_sms_is_reported_to_the_owner_and_never_shown_as_sent(monkeypatc
         assert notified["sms_user"] == "" and notified["sms_contact"].startswith("LifeLine:"), "the contact's receipt is shown, the owner's refusal is not faked"
     finally:
         client.__exit__(None, None, None)
+
+
+def test_mock_transcript_lines_are_turn_rows_one_to_one(client):
+    """#87: a mock call leaves what a live call leaves: one `turns` row per transcript event, same (call_id, seq, speaker, text),
+    seq counting 1..n per call, every line labelled simulated."""
+    task_id = start(client)
+    wait_for(client, task_id, "awaiting_approval")
+    lines = [e for e in events(client, task_id) if e["type"] == "transcript"]
+    assert len(lines) >= 10 and all(e["simulated"] is True and e["visibility"] == "contact" for e in lines)
+    with Session(client.app.state.engine) as session:
+        turns = session.exec(select(Turn).join(Call, Call.id == Turn.call_id).where(Call.task_id == task_id)).all()
+        rows = {(t.call_id, t.seq, t.speaker, t.text) for t in turns}
+    assert len(turns) == len(lines) == len(rows)
+    assert rows == {(e["call_id"], e["seq"], e["speaker"], e["text"]) for e in lines}
+    for call_id in call_ids(client, task_id).values():
+        seqs = [e["seq"] for e in lines if e["call_id"] == call_id]
+        assert seqs == list(range(1, len(seqs) + 1)), call_id
+        assert next(e for e in lines if e["call_id"] == call_id and e["speaker"] == "agent")["text"].startswith("Hi, I'm an AI assistant calling for a patient.")
+    for event in lines:
+        EVENTS_VALIDATOR.validate({k: v for k, v in event.items() if k != "id"})
+    assert [e["type"] for e in events(client, task_id, viewer="sarah") if e["type"] == "transcript"] == ["transcript"] * len(lines)
