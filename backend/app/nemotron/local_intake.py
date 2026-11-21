@@ -210,16 +210,19 @@ def _validate_outgoing(utterance: str, user: UserRecord, request: IntakeRequest)
             data["insurance_carrier"] = canonical
             log.warning("intake: insurance carrier %s", "normalised" if canonical else "replaced with null")
 
-    # search_area: "near home" or a place with a state code; anything else (a name, an address) becomes "near home".
+    # search_area: "near home", or a place verified on the device (known list, and spoken in the utterance).
+    # Anything else, a name shaped like a place included, becomes "near home".
     area = data.get("search_area") or "near home"
-    if area != "near home" and (
-        not backstop.looks_like_place(area) or backstop.unsafe_terms(area, leaks) or backstop.detect_identifiers(area)
-    ):
-        data["search_area"] = "near home"
-        dropped_kind = "address" if backstop.detect_identifiers(area) or re.search(r"\d", area) else "patient_name"
-        if dropped_kind not in data["dropped_fields"]:
-            data["dropped_fields"].append(dropped_kind)
-        log.warning("intake: search area replaced with 'near home' after a leak check")
+    if area != "near home":
+        place = backstop.verified_place(area, utterance)
+        if place is None:
+            data["search_area"] = "near home"
+            dropped_kind = "address" if backstop.detect_identifiers(area) or re.search(r"\d", area) else "patient_name"
+            if dropped_kind not in data["dropped_fields"]:
+                data["dropped_fields"].append(dropped_kind)
+            log.warning("intake: search area replaced with 'near home': not a verified place")
+        else:
+            data["search_area"] = place
 
     data["dropped_fields"].sort(key=DROPPABLE_FIELDS.index)
     serialized = json.dumps(data).lower()

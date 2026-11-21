@@ -263,7 +263,21 @@ CARE_TYPE_VOCAB: frozenset[str] = frozenset(
         "home", "health", "aide", "memory", "clinic", "geriatric", "geriatrics", "fall", "risk", "assessment", "diabetes", "diabetic",
     }
 )
-_PLACE = re.compile(r"^[A-Z][A-Za-z.'\- ]{1,40}, [A-Z]{2}$")
+# Places a search_area may name: the demo's Chicago area, verified on the device. A value outside this list, or one
+# the speaker never said, falls back to "near home", so a name shaped like a place ("Alex Taylor, IL") cannot leave.
+KNOWN_PLACES: frozenset[str] = frozenset(
+    {
+        "chicago", "evanston", "oak park", "skokie", "naperville", "schaumburg", "cicero", "berwyn", "wilmette", "winnetka",
+        "arlington heights", "des plaines", "elmhurst", "downers grove", "oak lawn", "orland park", "tinley park", "joliet",
+        "aurora", "elgin", "waukegan", "glenview", "northbrook", "park ridge", "niles", "morton grove", "lincolnwood",
+        "forest park", "river forest", "maywood", "la grange", "hinsdale", "wheaton", "lombard", "bolingbrook", "hyde park",
+        "lincoln park", "logan square", "rogers park", "lakeview", "wicker park", "pilsen", "bronzeville", "uptown",
+        "edgewater", "andersonville", "lincoln square", "humboldt park", "bridgeport", "beverly", "austin", "the loop", "loop",
+        "south loop", "west loop", "river north", "gold coast", "old town", "chinatown", "little village", "albany park",
+        "jefferson park", "portage park", "irving park", "avondale", "north center", "ravenswood", "englewood", "chatham",
+        "south shore", "woodlawn", "kenwood", "near north", "near west side", "garfield park", "west town", "bucktown",
+    }
+)
 
 
 def unsupported_care_terms(care_type: str) -> list[str]:
@@ -271,6 +285,9 @@ def unsupported_care_terms(care_type: str) -> list[str]:
     return [w for w in care_type.split() if w not in CARE_TYPE_VOCAB]
 
 
-def looks_like_place(area: str) -> bool:
-    """"Evanston, IL" or "Oak Park, IL": a place name with a state code, at most four words."""
-    return bool(_PLACE.match(area)) and len(area.split()) <= 4
+def verified_place(area: str, utterance: str) -> str | None:
+    """"Evanston, IL" when Evanston is a known place and the speaker said it; otherwise None."""
+    name = area.split(",", 1)[0].strip().lower()
+    if name in KNOWN_PLACES and re.search(r"\b" + re.escape(name) + r"\b", utterance.lower()):
+        return f"{name.title()}, IL"
+    return None

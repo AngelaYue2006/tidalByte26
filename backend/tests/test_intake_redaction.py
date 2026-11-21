@@ -319,6 +319,18 @@ def test_care_type_outside_the_appointment_vocabulary_fails_closed(care_type):
         run(row, AdversarialModel(row, care_type=care_type))
 
 
+def test_search_area_leaves_only_as_a_place_the_speaker_named():
+    """Known place and spoken: accepted in canonical form. Known place not spoken, or unknown: near home."""
+    spoken = ROWS[0] | {"utterance": "Eye exam near Oak Park please, I have VSP."}
+    spoken["expected"] = spoken["expected"] | {"insurance_carrier": "VSP", "budget_max": None, "needs_ride": False, "search_area": "Oak Park, IL"}
+    assert run(spoken, AdversarialModel(spoken, search_area="oak park, IL")).search_area == "Oak Park, IL"
+    assert run(spoken, AdversarialModel(spoken, search_area="Oak Park")).search_area == "Oak Park, IL"
+    assert run(spoken, AdversarialModel(spoken, search_area="Evanston, IL")).search_area == "near home"
+    for row in ROWS:
+        if row["expected"]["search_area"] != "near home":
+            assert backstop.verified_place(row["expected"]["search_area"], row["utterance"]) == row["expected"]["search_area"], row["id"]
+
+
 def test_every_fixture_care_type_is_in_the_vocabulary():
     for row in ROWS:
         assert backstop.unsupported_care_terms(row["expected"]["care_type"]) == [], row["id"]
@@ -348,6 +360,8 @@ def test_contact_name_absent_from_owner_record_never_leaves():
         run(row, AdversarialModel(row, care_type="Sarah Johnson"))
     area = run(row, AdversarialModel(row, search_area="near Sarah Johnson"))
     assert area.search_area == "near home" and "patient_name" in area.dropped_fields
+    shaped = run(row, AdversarialModel(row, search_area="Sarah Johnson, IL"))
+    assert shaped.search_area == "near home" and "patient_name" in shaped.dropped_fields
     carrier_row = row | {"utterance": row["utterance"].replace("with Delta Dental, ", "")}
     carrier_row["expected"] = carrier_row["expected"] | {"insurance_carrier": None}
     carrier = run(carrier_row, AdversarialModel(carrier_row, insurance_carrier="Sarah Johnson"))
@@ -362,7 +376,11 @@ def test_contact_name_absent_from_owner_record_never_leaves():
         ("search_area", "100 Example Street, Chicago", "near home"),
         ("search_area", "the clinic by my knee doctor", "near home"),
         ("search_area", "Evanston", "near home"),
+        ("search_area", "Evanston, IL", "near home"),
         ("search_area", "near Alex Taylor", "near home"),
+        ("search_area", "Alex Taylor, IL", "near home"),
+        ("search_area", "Sarah Johnson, IL", "near home"),
+        ("search_area", "Springfield, IL", "near home"),
         ("insurance_carrier", "Delta Dental DEMO-0000-0000-0001", None),
         ("insurance_carrier", "Medicare for her diabetes", "Medicare"),
         ("insurance_carrier", "Mary Johnson", None),
