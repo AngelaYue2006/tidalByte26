@@ -1,5 +1,6 @@
-"""Distances from the fixture origin, preserving the requested clinic order."""
+"""Fixture or Google driving facts, preserving the requested clinic order."""
 
+import logging
 import os
 
 from integrations.fixtures import read_fixture
@@ -7,10 +8,15 @@ from integrations.types import Clinic, Distance
 
 
 def drive(origin, clinics: list[Clinic]) -> list[Distance]:
-    if os.getenv("PLACES_MODE", "fixture") != "fixture":
-        raise RuntimeError(
-            "Distance live mode is not implemented; use PLACES_MODE=fixture"
-        )
+    mode = os.getenv("PLACES_MODE", "fixture")
+    if mode not in ("fixture", "live"):
+        raise RuntimeError("PLACES_MODE must be fixture or live")
+    if mode == "live":
+        return _live_drive(origin, clinics)
+    return _fixture_drive(origin, clinics)
+
+
+def _fixture_drive(origin, clinics):
     home = read_fixture("users.json")["owner"]["home"]
     valid_origin = origin == home["address"] or origin == home
     if isinstance(origin, (tuple, list)):
@@ -32,3 +38,31 @@ def drive(origin, clinics: list[Clinic]) -> list[Distance]:
             )
         )
     return result
+
+
+def _live_drive(origin, clinics):
+    from integrations.maps_google_api import MapsClient, MapsError
+    from integrations.routes_live import route, waypoint
+
+    origin_waypoint = waypoint(origin)
+    if not clinics:
+        return []
+    results = []
+    with MapsClient() as client:
+        for clinic in clinics:
+            try:
+                results.append(route(client, origin_waypoint, clinic))
+            except MapsError:
+                # Owner-approved fixture fallback: never assign synthetic times
+                # to an unrelated live clinic or a different origin.
+                try:
+                    fallback = _fixture_drive(origin, [clinic])[0]
+                except RuntimeError:
+                    raise RuntimeError(
+                        "Driving route unavailable; no matching fixture fallback"
+                    ) from None
+                logging.getLogger(__name__).warning(
+                    "Driving route unavailable; using simulated fixture distance/time"
+                )
+                results.append(fallback)
+    return results
