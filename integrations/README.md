@@ -2,7 +2,7 @@
 
 Calendar, Places, distance, SMS and transport expose the existing signatures from
 `docs/ARCHITECTURE.md`. All results are Pydantic facts from `integrations.types`.
-Live service modes raise before any network request. Voice implementations are
+Calendar supports live mode as described below; other live service modes still fail closed. Voice implementations are
 separate work (#13 and #26); this PR defines their types only.
 
 The defaults are `CALENDAR_MODE=mock`, `PLACES_MODE=fixture`, `SMS_MODE=mock`,
@@ -60,3 +60,47 @@ window clipping, confirmed-only calendar receipts, repeat receipt identities,
 allowlist failures, inbound role mapping and shared-schema dashboard payloads.
 Sockets are forbidden throughout that suite. `scripts/check.sh` runs all repository
 checks; use an environment with Ruff, pytest and backend dependencies installed.
+
+## Live Google Calendar (#28)
+
+`CALENDAR_MODE=live` uses the OAuth demo account's primary calendar. The only
+supported owner is the fixture owner ID; unknown owner IDs fail before contacting
+Google. The backend loads `.env` into the process environment; the adapter never
+loads a file or logs credentials. Required settings already exist:
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `APP_TIMEZONE`.
+OAuth uses only `calendar.freebusy` and `calendar.events`. No model IDs are needed
+to call these adapters in isolation.
+
+`free_windows(owner_id, start_iso, end_iso)` validates timezone-aware bounds,
+queries `freebusy.query`, clips and merges all busy intervals, and returns their
+complement in `APP_TIMEZONE`. Merging is in UTC so daylight-saving folds are
+handled correctly. A missing calendar, per-calendar error or malformed interval
+fails closed instead of pretending the whole range is available.
+
+`create_event(owner_id, booking, idempotency_key)` requires a confirmed Booking.
+It inserts a private event titled `Appointment`, with clinic/address description,
+location, configured timezone and a popup reminder 1440 minutes before the event.
+No attendees are added and `sendUpdates=none` suppresses invitations. The caller
+still must enforce the approved task state; a typed confirmed Booking by itself
+is not an authorization gate. The adapter does not read or write database state.
+
+The event ID is a Google-compatible hash of owner ID plus idempotency key (the
+backend supplies task ID plus step). A repeated insert gets HTTP 409, fetches the
+existing event and verifies the content hash and actual title, status, location,
+description, times, visibility and reminders before returning the receipt. A
+reused key for different contents or an edited/cancelled event fails, rather than
+confirming the wrong event. Timeouts do not return a receipt; a later retry with
+the same key can recover a previously committed insert. Tokens, URLs and vendor
+response bodies are not included in adapter error messages.
+
+**Owner-approved demo limitation:** Booking has no address field in the shared
+contract. Resolve the known demo clinic name from `backend/fixtures/clinics.json`
+and reject unknown clinics before any insert. Before Calendar supports arbitrary
+live-discovered clinics, the backend/shared owners must add an address to the
+booking contract; do not guess it or substitute an unrelated fixture. No current
+adapter signatures or shared schemas were changed for this demo implementation.
+
+The live hand test uses only `free_windows`; no real calendar event was inserted.
+Event creation, duplicate recovery, mismatched receipts and network errors are
+covered against an in-memory vendor and `httpx.MockTransport`. This proves the
+adapter behavior without claiming a real booking or bypassing task approval.
