@@ -139,7 +139,8 @@ def test_no_configured_secret_fails_closed_even_in_development():
 
 def test_data_collection_fields_become_call_result_and_done(client, app):
     r = post(client, payload())
-    assert r.status_code == 200 and r.json()["accepted"] == "post_call_transcription"
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "accepted": "post_call_transcription", "duplicate": False, "complete": True, "source": "data_collection"}
     assert events(app) == [
         ("call_result", "contact", {"call_id": "call-a", "price": "$95", "slot": "Thu 9:30", "insured": True, "slotOk": True}),
         ("call_status", "contact", {"call_id": "call-a", "status": "done"}),
@@ -252,6 +253,30 @@ def test_failed_finalization_leaves_nothing_and_a_retry_completes(client, app, m
     post(client, payload())
     assert len(events(app, "call_result")) == 1 and len(events(app, "call_status")) == 1
     assert calls["n"] == 2 and call(app)[0] == "done"
+
+
+def test_processing_failure_is_answered_500_so_elevenlabs_retries(client, app, monkeypatch):
+    original = call_results.Event
+
+    class Boom(Exception):
+        pass
+
+    def exploding_event(**kwargs):
+        raise Boom("event row write failed")
+
+    monkeypatch.setattr(call_results, "Event", exploding_event)
+    r = post(client, payload())
+    assert r.status_code == 500 and "retry" in r.json()["detail"]
+    assert call(app)[0] == "live" and call(app)[1] is None and events(app) == []  # nothing committed, nothing acknowledged
+    monkeypatch.setattr(call_results, "Event", original)
+    r = post(client, payload())  # the retry ElevenLabs sends after a non-2xx
+    assert r.status_code == 200 and r.json()["complete"] is True
+    assert len(events(app, "call_result")) == 1 and len(events(app, "call_status")) == 1 and call(app)[0] == "done"
+
+
+def test_duplicate_is_acknowledged_as_such(client):
+    post(client, payload())
+    assert post(client, payload()).json() == {"ok": True, "accepted": "post_call_transcription", "duplicate": True}
 
 
 def _call_and_task(app):
