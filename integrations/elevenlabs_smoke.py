@@ -86,7 +86,7 @@ def run(args):
         if method == "POST" and path == "twilio/outbound-call":
             control["sid"] = data.get("callSid")
             if control["sid"]:
-                watchdog = threading.Timer(40, stop_call)
+                watchdog = threading.Timer(60, stop_call)
                 watchdog.start()
             else:
                 print("No Twilio control receipt; teammate must hang up before one minute", flush=True)
@@ -99,7 +99,8 @@ def run(args):
             handle = voice_elevenlabs.start_call(spec)
         print("Adapter accepted one live call; simulated=" + str(handle.simulated), flush=True)
         if watchdog:
-            watchdog.join()  # bounds the connected call; SDK requests have five-second timeouts
+            while watchdog.is_alive():
+                watchdog.join(timeout=1)  # keep the sixty-second watchdog responsive
         else:
             raise RuntimeError("Missing call-control receipt; verify hangup before retrying")
         if control["error"]:
