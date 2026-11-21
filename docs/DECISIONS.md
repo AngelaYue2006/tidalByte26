@@ -38,6 +38,14 @@
 - **Dashboard session cookie.** The docs name a shared session cookie but not its shape. Default: `GET /api/session` issues `lifeline_session = <nonce>.<hmac_sha256(nonce, DASHBOARD_SESSION_SECRET)>`, HttpOnly, SameSite=Lax; the read routes require it; development with no secret uses a random per-process secret, any other `APP_ENV` fails startup without one. The Next.js dashboard has to call `GET /api/session` once before opening the stream (frontend follow-up).
 - **Visibility semantics.** `owner` reaches the owner only, `contact` reaches both roles, `internal` reaches no dashboard; a viewer id that is a `contacts` row is that owner's contact, any other viewer id is an owner.
 
+## Defaults taken while building (#11)
+
+- **Where the pipeline runs.** One asyncio task per request on the server loop; the two waits are in-process events released by `POST /api/tasks/{id}/approve` and `POST /api/contacts/offers`. A restart mid-wait loses the wait; persisting and resuming it is #24's idempotency work.
+- **Mock SMS and the allowlist.** The SMS mock checks `DEMO_PHONE_ALLOWLIST` like live does, so for a mocked run the fixture's fictional numbers (`+1555555010x`, `+1555555011x`) must be on the list in `.env`. An SMS the adapter refuses is logged as an `internal` `task_updated` with reason `SMS_NOT_SENT`, never faked.
+- **Contact message.** A template with only the contact's scope (clinic, time, address, ride need) until #23 has Nano write it on the device.
+- **Voice seam.** The orchestrator calls `voice.call_clinics(specs, on_event)` and `voice.confirm_booking(spec, slot)`; `app/adapters.py` bridges that to the receptionist simulator's `start_call`/`confirm_booking` (#13) and later to ElevenLabs (#26). Tests use a stand-in that replays the same fixture.
+- **Status events.** Every step emits `task_updated` with `contact` visibility so both views track the status; a failure adds `reason` and one honest `message`.
+
 ## Open items to verify at kickoff
 
 - Exact NVIDIA model IDs for Lightning and Super, and whether the chat endpoint supports `stream: true`.

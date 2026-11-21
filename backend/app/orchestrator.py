@@ -1,1 +1,324 @@
-"""Deterministic pipeline (docs/ARCHITECTURE.md, Pipeline). Runs steps 1-10, writes events, waits on approval and contact reply. Side effects keyed by task_id + step."""
+"""Deterministic pipeline (docs/ARCHITECTURE.md, Pipeline). Runs steps 1-10, writes events, waits on approval and contact reply. Side effects keyed by task_id + step.
+
+One `Pipeline` per app. `start(task_id, text)` schedules `run` on the server loop; `resume(task_id)` releases a wait.
+Every step moves the task through state.transition, persists, and emits `task_updated`; adapters return facts and
+the pipeline records them. Nothing is booked and no calendar event is written before the `approved` event.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import Engine
+from sqlmodel import Session
+
+from app import texts
+from app.adapters import Deps
+from app.db import session_scope
+from app.events import EventBus, emit
+from app.models import Call, Task
+from app.nemotron import local_intake
+from app.nemotron.ranker import timed_rank
+from app.nemotron.types import IntakeRequest, UserRecord
+from app.people import ensure_contacts, load_owner
+from app.ranking import hard_rules, money, no_eligible_offer, slot_label
+from app.state import transition
+from integrations.types import Booking, CallSpec, Clinic, Offer, Window
+from integrations.types import IntakeRequest as WireIntakeRequest
+
+log = logging.getLogger(__name__)
+
+APPROVAL_WINDOW = timedelta(minutes=10)
+CALL_IDS = "abcdefghij"
+
+
+class PipelineFailure(Exception):
+    """A step could not complete. `code` is one of the error codes in docs/ARCHITECTURE.md."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass
+class Run:
+    task_id: str
+    owner: UserRecord
+    text: str  # the raw utterance: stays in this process and the on-device events table, never in a log or a network call
+    intake: IntakeRequest | None = None
+    windows: list[Window] | None = None
+    clinics: list[Clinic] | None = None
+    specs: dict[str, CallSpec] | None = None
+    offers: list[Offer] | None = None
+    winner: Offer | None = None
+    booking: Booking | None = None
+
+
+class Pipeline:
+    def __init__(self, deps: Deps, engine: Engine, bus: EventBus) -> None:
+        self.deps = deps
+        self.engine = engine
+        self.bus = bus
+        self._waits: dict[str, asyncio.Event] = {}
+        self._tasks: dict[str, asyncio.Task] = {}
+        self.request_keys: dict[str, str] = {}  # idempotency_key -> task_id, until #24 persists receipts
+
+    # ---- entry points -------------------------------------------------------------------------------------------
+
+    def start(self, task_id: str, text: str) -> asyncio.Task:
+        task = asyncio.get_running_loop().create_task(self.run(task_id, text), name=f"pipeline:{task_id}")
+        self._tasks[task_id] = task
+        return task
+
+    def resume(self, task_id: str) -> bool:
+        """Release the wait a POST has satisfied. False when nothing is waiting for this task."""
+        event = self._waits.get(task_id)
+        if event is None:
+            return False
+        event.set()
+        return True
+
+    def waiting(self, task_id: str) -> bool:
+        return task_id in self._waits
+
+    # ---- the ten steps -------------------------------------------------------------------------------------------
+
+    async def run(self, task_id: str, text: str) -> None:
+        with Session(self.engine) as session:
+            owner_id = session.get(Task, task_id).owner_id
+        run = Run(task_id=task_id, owner=load_owner(owner_id), text=text)
+        try:
+            await self._intake(run, text)
+            self._calendar(run)
+            self._places(run)
+            await self._calling(run)
+            await self._ranking(run)
+            if not await self._await_approval(run):
+                return
+            self._booking(run)
+            needs_contact = self._transport(run)
+            if needs_contact and not await self._await_contact(run):
+                return
+            self._completed(run)
+        except PipelineFailure as failure:
+            self._fail(run, failure.code, str(failure))
+        except Exception as exc:  # a bug or an adapter error: never a silent completed
+            log.exception("pipeline %s crashed", task_id)
+            self._fail(run, "CALL_FAILED" if run.offers is None and run.specs else "INTERNAL_ERROR", f"{type(exc).__name__}: {exc}")
+        finally:
+            self._tasks.pop(task_id, None)
+
+    async def _intake(self, run: Run, text: str) -> None:
+        self._set_status(run, "intake")
+        try:
+            run.intake = await asyncio.to_thread(local_intake.redact, text, run.owner, model=self.deps.intake_model(), now=self._now(run))
+        except local_intake.IntakeError as exc:
+            raise PipelineFailure("INTAKE_INCOMPLETE", str(exc)) from exc
+        with session_scope(self.engine) as session:
+            task = session.get(Task, run.task_id)
+            task.intake_json = run.intake.model_dump_json()
+            ensure_contacts(session, run.owner.id)
+        # chips need the windows; the request event is emitted after the calendar step with everything it shows
+
+    def _calendar(self, run: Run) -> None:
+        self._set_status(run, "calendar")
+        intake = run.intake
+        run.windows = list(self.deps.free_windows(run.owner.id, intake.time_range.start, intake.time_range.end))
+        with session_scope(self.engine) as session:
+            session.get(Task, run.task_id).windows_json = json.dumps([{"start": w.start.isoformat(), "end": w.end.isoformat()} for w in run.windows])
+        self._emit(run, "request", {"text": run.text, "chips": texts.chips(intake.care_type, intake.budget_max, intake.insurance_carrier, run.windows)}, "contact")
+
+    def _places(self, run: Run) -> None:
+        self._set_status(run, "places")
+        intake = run.intake
+        run.clinics = list(self.deps.find_clinics(intake.care_type, intake.search_area or "near home", 3))
+        if not run.clinics:
+            raise PipelineFailure("NO_CLINICS_FOUND", f"No clinic offering {intake.care_type} was found near {intake.search_area or 'home'}.")
+        origin = run.owner.home.address if run.owner.home else "near home"
+        distances = {d.place_id: d for d in self.deps.drive(origin, run.clinics)}
+        wire_request = WireIntakeRequest(**intake.model_dump(exclude={"time_range"}), time_range=Window(start=intake.time_range.start, end=intake.time_range.end))
+        run.specs = {}
+        with session_scope(self.engine) as session:
+            for call_id, clinic in zip(CALL_IDS, run.clinics, strict=False):
+                distance = distances.get(clinic.place_id)
+                run.specs[call_id] = CallSpec(clinic=clinic, request=wire_request, windows=run.windows, call_id=call_id)
+                session.add(Call(id=f"{run.task_id}:{call_id}", task_id=run.task_id, clinic_name=clinic.name, clinic_phone=clinic.phone_e164,
+                                 distance_mi=distance.miles if distance else None, status="dialing", started_at=datetime.now(UTC)))
+        for call_id, clinic in zip(CALL_IDS, run.clinics, strict=False):
+            distance = distances.get(clinic.place_id)
+            meta = f"{distance.miles:g} mi · {distance.minutes:g} min" if distance else ""
+            self._emit(run, "call_start", {"call_id": call_id, "clinic": clinic.name, "meta": meta, "simulated": clinic.simulated}, "contact")
+
+    async def _calling(self, run: Run) -> None:
+        self._set_status(run, "calling")
+        offers = await self.deps.voice.call_clinics(list(run.specs.values()), lambda event: self._voice_event(run, event))
+        run.offers = list(offers)
+        if not run.offers:
+            raise PipelineFailure("CALL_FAILED", "No clinic call produced an offer.")
+
+    def _voice_event(self, run: Run, event: dict) -> None:
+        """A `call_status`, `transcript` or `call_result` payload from the voice adapter: record the fact, then emit."""
+        event = dict(event)
+        type_ = event.pop("type")
+        call_id = event.get("call_id")
+        if type_ == "call_status":
+            with session_scope(self.engine) as session:
+                call = session.get(Call, f"{run.task_id}:{call_id}")
+                if call is not None:
+                    call.status = event["status"]
+                    if event["status"] == "done":
+                        call.ended_at = datetime.now(UTC)
+        elif type_ == "call_result":
+            with session_scope(self.engine) as session:
+                call = session.get(Call, f"{run.task_id}:{call_id}")
+                if call is not None:
+                    call.result_json = json.dumps({k: event[k] for k in ("price", "slot", "insured", "slotOk") if k in event})
+        self._emit(run, type_, event, "contact")
+
+    async def _ranking(self, run: Run) -> None:
+        self._set_status(run, "ranking")
+        intake = run.intake
+        result = hard_rules(run.offers, run.windows, intake.budget_max, intake.insurance_carrier)
+        if not result.ok:
+            failure = no_eligible_offer(result)
+            raise PipelineFailure(failure["code"], failure["message"])
+        priority = "the earliest appointment inside the free windows, then the lowest price"
+        try:
+            decision, _ = await asyncio.to_thread(
+                timed_rank, result.eligible, run.windows, priority, client=self.deps.rank_client(), all_offers=run.offers, carrier=intake.insurance_carrier
+            )
+        except Exception as exc:
+            raise PipelineFailure("RANKING_FAILED", f"Ranking did not produce a decision: {exc}") from exc
+        run.winner = next(o for o in run.offers if o.call_id == decision["winner_call_id"])
+        with session_scope(self.engine) as session:
+            session.get(Task, run.task_id).decision_json = json.dumps(decision)
+        self._emit(run, "decision", {"winner": decision["winner_call_id"], "title": f"Why Nemotron picked {run.winner.clinic}",
+                                     "reasons": decision["reasons"], "second": decision["second"], "tradeoff": decision["tradeoff"]}, "contact")
+
+    async def _await_approval(self, run: Run) -> bool:
+        self._set_status(run, "awaiting_approval")
+        winner = run.winner
+        expires = self._now(run) + APPROVAL_WINDOW
+        self._emit(run, "approval_required", {"pick": {"clinic": winner.clinic, "slot": slot_label(winner.slot_start), "price": money(winner.price)},
+                                              "expires_at": expires.isoformat()}, "contact")
+        self._sms(run, run.owner.phone_e164, texts.approval_sms(winner.clinic, winner.slot_start, winner.price), "approval")
+        await self._wait(run.task_id)
+        return self._status(run) == "awaiting_approval"  # a rejection moved it to cancelled
+
+    def _booking(self, run: Run) -> None:
+        self._set_status(run, "booking")
+        winner = run.winner
+        spec = run.specs[winner.call_id]
+        slot = {"slot_start": winner.slot_start.isoformat(), "slot_end": winner.slot_end.isoformat()}
+        confirmation = self.deps.voice.confirm_booking(spec, slot)
+        if confirmation.status == "rejected":
+            raise PipelineFailure("BOOKING_REJECTED", f"{winner.clinic} did not confirm the appointment: {confirmation.evidence}")
+        run.booking = Booking(clinic=winner.clinic, slot_start=winner.slot_start, slot_end=winner.slot_end, price=money(winner.price),
+                              status=confirmation.status, confirmation_ref=confirmation.confirmation_ref)
+        address = spec.clinic.address
+        if confirmation.status == "confirmed":
+            receipt = self.deps.create_event(run.owner.id, run.booking, f"{run.task_id}:calendar")  # once, keyed by task
+            run.booking = run.booking.model_copy(update={"calendar_event_id": receipt.event_id})
+            payload = {"calendar": texts.calendar_card(winner.slot_start, winner.slot_end, address),
+                       "sms_user": texts.booked_sms(winner.clinic, winner.slot_start, winner.price, run.intake.insurance_carrier), "simulated": receipt.simulated}
+        else:
+            payload = {"calendar": "", "sms_user": texts.tentative_sms(winner.clinic, winner.slot_start), "tentative": True, "simulated": confirmation.simulated}
+        with session_scope(self.engine) as session:
+            session.get(Task, run.task_id).booking_json = run.booking.model_dump_json()
+        self._sms(run, run.owner.phone_e164, payload["sms_user"], "booked")
+        self._emit(run, "booked", payload, "contact")
+
+    def _transport(self, run: Run) -> bool:
+        """Step 8. Returns True when the contact must be asked for a ride."""
+        self._set_status(run, "transport")
+        self._emit(run, "transport_check", {"status": "checking", "reason": "", "simulated": True}, "contact")
+        options = self.deps.transport_check(run.booking, {"needs_ride": run.intake.needs_ride})
+        with session_scope(self.engine) as session:
+            session.get(Task, run.task_id).transport_json = options.model_dump_json()
+        payload = options.dashboard_event()
+        payload.pop("type")
+        self._emit(run, "transport_check", payload, "contact")
+        return run.intake.needs_ride and not options.available
+
+    async def _await_contact(self, run: Run) -> bool:
+        self._set_status(run, "awaiting_contact")
+        with Session(self.engine) as session:
+            contacts = ensure_contacts(session, run.owner.id)
+            contact = next((c for c in contacts if c.scope == "ride_requests"), None)
+            if contact is None:
+                raise PipelineFailure("CONTACT_DECLINED", "No emergency contact is on file to ask for a ride.")
+            name, phone = contact.name, contact.phone_e164
+        spec = run.specs[run.winner.call_id]
+        message = texts.contact_request_message(run.owner.name.split()[0], run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
+        self._sms(run, phone, message, "contact_request")
+        self._emit(run, "contact_request", {"contact": name.split()[0], "message": message}, "contact")
+        await self._wait(run.task_id)
+        return self._status(run) == "awaiting_contact"
+
+    def _completed(self, run: Run) -> None:
+        winner, first = run.winner, run.owner.name.split()[0]
+        spec = run.specs[winner.call_id]
+        with Session(self.engine) as session:
+            contacts = ensure_contacts(session, run.owner.id)
+            contact = next((c for c in contacts if c.scope == "ride_requests"), None)
+            driver = contact.name.split()[0] if contact else None
+            contact_phone = contact.phone_e164 if contact else None
+        if run.intake.needs_ride:
+            sms_user = texts.ride_confirmed_sms_user(driver or "Your contact", winner.clinic, winner.slot_start)
+            sms_contact = texts.ride_confirmed_sms_contact(first, winner.clinic, winner.slot_start)
+        else:
+            sms_user = texts.booked_sms(winner.clinic, winner.slot_start, winner.price, run.intake.insurance_carrier)
+            sms_contact = texts.no_ride_needed_sms_contact(first, winner.clinic, winner.slot_start, spec.clinic.address)
+        self._sms(run, run.owner.phone_e164, sms_user, "final_owner")
+        if contact_phone:
+            self._sms(run, contact_phone, sms_contact, "final_contact")
+        self._emit(run, "notified", {"sms_contact": sms_contact, "sms_user": sms_user, "simulated": True}, "contact")
+        self._set_status(run, "completed")
+
+    # ---- plumbing -------------------------------------------------------------------------------------------------
+
+    async def _wait(self, task_id: str) -> None:
+        event = self._waits.setdefault(task_id, asyncio.Event())
+        try:
+            await event.wait()
+        finally:
+            self._waits.pop(task_id, None)
+
+    def _set_status(self, run: Run, status: str) -> None:
+        with session_scope(self.engine) as session:
+            task = session.get(Task, run.task_id)
+            if task.status != status:  # a new task is created in `intake`; every later step is a real transition
+                transition(task, status)
+        self._emit(run, "task_updated", {"status": status}, "contact")
+
+    def _status(self, run: Run) -> str:
+        with Session(self.engine) as session:
+            return session.get(Task, run.task_id).status
+
+    def _fail(self, run: Run, code: str, message: str) -> None:
+        log.warning("task %s failed: %s", run.task_id, code)
+        with session_scope(self.engine) as session:
+            task = session.get(Task, run.task_id)
+            if task.status not in ("failed", "cancelled", "completed"):
+                transition(task, "failed")
+        self._emit(run, "task_updated", {"status": "failed", "reason": code, "message": message}, "contact")
+
+    def _emit(self, run: Run, type_: str, payload: dict, visibility: str) -> None:
+        emit(self.engine, self.bus, run.task_id, type_, payload, visibility)
+
+    def _sms(self, run: Run, to: str, text: str, step: str) -> None:
+        """Keyed by task and step: the mock returns the same receipt for a repeat, and live Twilio will too (#24)."""
+        try:
+            self.deps.sms_send(to, text, f"{run.task_id}:{step}")
+        except (RuntimeError, OSError, ValueError) as exc:  # the adapters raise plain, readable errors
+            # An SMS that cannot be sent (number not on the allowlist, vendor down) is reported, never faked.
+            log.warning("sms %s for task %s not sent: %s", step, run.task_id, exc)
+            self._emit(run, "task_updated", {"status": self._status(run), "reason": "SMS_NOT_SENT", "message": str(exc)}, "internal")
+
+    def _now(self, run: Run) -> datetime:
+        return self.deps.now() if self.deps.now else datetime.now(ZoneInfo(run.owner.timezone))
