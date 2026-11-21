@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from datetime import timedelta
 
-import pytest
 from app import orchestrator
 from harness import CONTACT, DEMO_NOW, OWNER_PHONE, Lab
 
@@ -35,7 +34,6 @@ def test_t6_nothing_is_booked_while_the_owner_has_not_answered(lab: Lab):
     lab.wait_for(task_id, "awaiting_contact")
 
 
-@pytest.mark.xfail(reason="#22 (PR #80): one reminder SMS on approval timeout is not merged yet", strict=False)
 def test_t6_timeout_sends_one_reminder_and_keeps_waiting(lab: Lab):
     lab.app.state.pipeline.approval_timeout_s = 0.3  # read when the next task enters awaiting_approval (#22)
     task_id = lab.start()

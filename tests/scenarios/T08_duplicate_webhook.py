@@ -1,12 +1,11 @@
 """T8 — Repeated webhooks and retries: no duplicate SMS, booking or calendar event.
 
 The three replays that exist today (the request key, the approval key, the contact-offer key) and the ElevenLabs
-post-call webhook are tested against the running backend; the Twilio SMS webhook replay waits on #22.
+post-call webhook and the Twilio SMS webhook are all tested against the running backend.
 """
 
 from __future__ import annotations
 
-import pytest
 from harness import BRIGHT, CONTACT_PHONE, DEMO_NOW, OWNER_PHONE, Lab
 
 
@@ -57,7 +56,6 @@ def test_t8_repeated_post_call_webhook_adds_no_result_event(lab: Lab):
     assert lab.task(task_id)["status"] == "awaiting_approval" and lab.voice.confirmed == []
 
 
-@pytest.mark.xfail(reason="#22 (PR #80): POST /api/webhooks/twilio/sms and the SMS YES approval are not merged yet", strict=False)
 def test_t8_repeated_twilio_yes_books_once(lab: Lab):
     task_id = lab.start()
     lab.wait_for(task_id, "awaiting_approval")

@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import re
 
-import pytest
 from harness import BRIGHT, OAK, SMILE, UNKNOWN_PHONE, Lab
 
 STRANGER = "stranger"  # a viewer id that is neither the owner nor a row in contacts
@@ -23,7 +22,6 @@ def test_t9_a_viewer_outside_the_owner_and_contact_gets_no_task_data(lab: Lab):
     assert lab.task(task_id)["status"] == "awaiting_approval"
 
 
-@pytest.mark.xfail(reason="#22 (PR #80): POST /api/webhooks/twilio/sms is not merged yet", strict=False)
 def test_t9_sms_from_an_unknown_number_is_rejected_and_logged(lab: Lab, caplog):
     caplog.set_level(logging.INFO)
     task_id = lab.start()

@@ -27,5 +27,5 @@ scripts/check.sh                      # runs them with the backend and integrati
 ## Scenarios that wait on another PR
 
 A test for a route or behaviour that is not merged yet is written to the contract in `docs/ARCHITECTURE.md` and marked
-`xfail` with the issue number in the reason (T6 reminder, T8 Twilio replay, T9 unknown sender → #22; T10 SMS NO → #23). When the PR merges the test turns `XPASS`; remove the marker in the same PR or the next refresh of
+`xfail` with the issue number in the reason (T10 SMS NO → #23). When the PR merges the test turns `XPASS`; remove the marker in the same PR or the next refresh of
 this folder, and update `RESULTS.md`.
