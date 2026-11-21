@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pytest
 from app import orchestrator
-from harness import DEMO_NOW, OWNER_PHONE, Lab
+from harness import CONTACT, DEMO_NOW, OWNER_PHONE, Lab
 
 
 def approval_window(lab: Lab) -> timedelta:
@@ -47,7 +47,9 @@ def test_t6_timeout_sends_one_reminder_and_keeps_waiting(lab: Lab):
     lab.settle(0.5)
     assert len(lab.sms_to(OWNER_PHONE)) == 2, "the pick, then exactly one reminder"
     assert lab.task(task_id)["status"] == "awaiting_approval"
-    assert any(e.get("reason") == "APPROVAL_TIMEOUT" for e in lab.of_type(task_id, "task_updated")), "the timeout is an event, not a silent wait"
+    timeouts = [e for e in lab.of_type(task_id, "task_updated") if e.get("reason") == "APPROVAL_TIMEOUT"]
+    assert len(timeouts) == 1 and timeouts[0]["visibility"] == "owner", "the timeout is one owner-only event, not a silent wait"
+    assert not [e for e in lab.of_type(task_id, "task_updated", CONTACT) if e.get("reason") == "APPROVAL_TIMEOUT"]
     assert lab.voice.confirmed == [] and lab.calendar_writes == [] and "booked" not in lab.types(task_id)
 
     assert lab.approve(task_id).json()["applied"] is True
