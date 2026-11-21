@@ -120,7 +120,8 @@ def test_duplicate_sms_is_a_no_op(client):
 def test_contact_number_cannot_approve(client):
     task_id = start(client)
     wait_for(client, task_id, "awaiting_approval")
-    assert sms(client, "YES", sender=CONTACT_PHONE) == {"ok": True, "ignored": "not_owner"}
+    # a contact's text is a ride reply, not an approval (#23): nothing of theirs is waiting yet, so it changes nothing
+    assert sms(client, "YES", sender=CONTACT_PHONE) == {"ok": True, "role": "contact", "outcome": "no_task_waiting"}
     time.sleep(0.2)
     assert client.get(f"/api/tasks/{task_id}?viewer_id=mary").json()["status"] == "awaiting_approval"
     assert "approved" not in types(client, task_id)

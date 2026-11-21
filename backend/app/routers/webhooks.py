@@ -31,7 +31,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from app import approvals, call_results
+from app import approvals, call_results, contact_replies
 from app.config import MissingSetting, Settings
 from app.db import session_scope
 from app.events import EventBus, emit_many
@@ -216,8 +216,9 @@ def handle_inbound(app, form) -> dict:
         log.warning("inbound SMS ignored: %s", str(exc).split(":")[0])
         return {"ok": False, "ignored": "unverified_sender"}
     if inbound.role != "owner":
-        log.info("inbound SMS from a contact is not an approval; contact replies are handled by the contact route (#23)")
-        return {"ok": True, "ignored": "not_owner"}
+        # The contact's answer to the ride request (#23): yes confirms once, no keeps waiting and tells the owner.
+        outcome = contact_replies.handle_contact_sms(app.state.engine, app.state.bus, app.state.pipeline, inbound.from_e164, inbound.body, inbound.message_id)
+        return {"ok": True, "role": "contact", **outcome}
     decision = approvals.decision_from_text(inbound.body)
     if decision is None:
         return {"ok": True, "ignored": "not_an_answer"}
