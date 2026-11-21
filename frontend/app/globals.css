@@ -400,6 +400,80 @@ select {
   color: var(--bad);
 }
 
+.chip-warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.transport-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.transport-sub {
+  margin: 0 0 4px;
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.transport-status p {
+  margin: 0 0 6px;
+}
+
+.transport-sim {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.transport-reason {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.transport-block {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.transport-sms {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.transport-ride {
+  border-top-color: var(--good);
+}
+
+.status-card-text {
+  margin: 0;
+}
+
+.confirms {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.confirm-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.confirm-card h2 {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-weight: 500;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 @media (max-width: 800px) {
   .wrap {
     padding: 16px;
@@ -414,7 +488,8 @@ select {
     height: 56px;
   }
 
-  .calls {
+  .calls,
+  .confirms {
     grid-template-columns: 1fr;
   }
 }

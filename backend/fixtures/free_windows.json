@@ -1,1 +1,18 @@
-{}
+{
+  "_note": "Mary's free windows for the demo week, used when CALENDAR_MODE=mock. Times are America/Chicago (CST, -06:00 in November).",
+  "owner_id": "mary",
+  "timezone": "America/Chicago",
+  "week_start": "2026-11-23",
+  "windows": [
+    {
+      "label": "Tue pm",
+      "start": "2026-11-24T13:00:00-06:00",
+      "end": "2026-11-24T17:00:00-06:00"
+    },
+    {
+      "label": "Thu am",
+      "start": "2026-11-26T08:00:00-06:00",
+      "end": "2026-11-26T12:00:00-06:00"
+    }
+  ]
+}
