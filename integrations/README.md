@@ -154,6 +154,70 @@ Vendor references: [Text Search](https://developers.google.com/maps/documentatio
 [Place Details](https://developers.google.com/maps/documentation/places/web-service/place-details),
 [computeRoutes](https://developers.google.com/maps/documentation/routes/reference/rest/v2/TopLevel/computeRoutes).
 
+## Scripted receptionists (#13)
+
+The mock keeps `voice_mock.start_call(call: CallSpec) -> CallHandle` and
+`voice_mock.confirm_booking(call: CallSpec, slot) -> Confirmation`. Both enforce
+`VOICE_MODE=mock` and `DEMO_PHONE_ALLOWLIST`, including for synthetic fixtures.
+No phone is dialed. Use explicit synthetic numbers in the process allowlist for
+local fixture tests; production/demo allowlists remain in the ignored `.env`.
+
+Bind a backend-owned callback around a pipeline run:
+
+```python
+async with voice_mock.callbacks(emit_voice_event) as session:
+    handles = [voice_mock.start_call(spec) for spec in call_specs]
+    offers = await asyncio.gather(*(session.wait_call(h) for h in handles))
+```
+
+`emit_voice_event(event)` receives the schema-shaped `call_status`, `transcript`
+and `call_result` dictionaries, each with `call_id` and `simulated: true`. It may
+be synchronous or asynchronous. The backend shim must route transcript turns
+through the same common recorder as the live proxy, attach the task and proper
+viewer visibility, and publish each event once. `events.emit` expects type
+separate from the payload, so the shim removes `type` before passing that payload.
+Do not have both the recorder and shim emit the same transcript twice.
+
+The backend recorder fix (#87 / PR #88) is merged. The actual callback is
+`record_turn(engine, bus, spec, seq, speaker, text, simulated=True)`, using the
+backend proxy CallSpec loaded by `load_spec`. The simulator supplies stable
+1-based transcript `seq` values scoped to each call, ordered by fixture timing.
+The backend owns persistence, task visibility and deduplication by `(call_id, seq)`.
+Status/result events retain their normal sink; transcripts are published once.
+
+`integrations/tests/test_voice_backend_callback.py` exercises the actual default
+bridge and backend sink against an in-memory synthetic database. Both assertions
+are required passing tests: three completed calls and 13 simulated transcript
+lines, with one recorder invocation and one matching Turn row per transcript.
+The adapter itself never imports backend persistence or writes a database.
+
+`start_call` returns immediately and schedules timed playback; the context exits
+only after playback finishes, or cancels pending tasks on failure/cancellation.
+The returned offer comes from structured fixture results, never transcript text.
+`slotOk` checks full slot containment in the supplied free windows. Clinic
+identity is matched by fixture place ID, not phone, so a safe teammate-number
+substitution can retain the same script. Unknown scripts and missing first-agent
+AI disclosures fail before any events. Timing follows fixture `at_ms` values,
+including the longer hold. All three calls share the event loop and overlap.
+
+Within one session, an identical call-ID/spec retry reuses its task and handle;
+a conflicting specification fails. Persisted receipts and idempotency across
+process/session restarts remain the backend's responsibility. Callback failures
+propagate through `wait_call` or context exit. Nested async contexts keep separate
+callbacks and task registries.
+
+Booking reads the fixture's structured `booking_reply` and only accepts the
+offered slot (label, aware ISO timestamp, Window or start/end mapping). Bright
+Smile/Smile Co. produce simulated confirmed receipts; Oak Dental produces the
+simulated tentative T7 variant without a confirmation reference. This method
+returns synthetic facts only; the backend must enforce the approval gate and
+never create a calendar event for tentative results.
+
+`python -m pytest -q integrations/tests/test_voice_mock.py` includes one real-time
+fixture test (about 15 seconds), plus fast callback, retry, allowlist, disclosure,
+slot-match, cancellation and tentative-receipt regressions. External networking
+is forbidden; Windows asyncio's internal loopback socket pair is allowed.
+
 ## Live SMS (#27)
 
 `SMS_MODE=live` retains `send(to_e164, text, idempotency_key)` and
