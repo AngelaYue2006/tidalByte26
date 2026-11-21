@@ -21,6 +21,7 @@ from app.routers import (
     contacts,
     demo,
     live,
+    llm_proxy,
     requests,
     tasks,
     twilio_sms,
@@ -80,6 +81,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     app.include_router(approvals.router)
     app.include_router(contacts.router)
     app.include_router(webhooks.router)
+    app.include_router(llm_proxy.router)
     if settings.twilio_kickoff_stub:
         # The #7 tunnel stub has no signature check, so it is never part of the normal app (TWILIO_KICKOFF_STUB=1 only).
         app.include_router(twilio_sms.router)
