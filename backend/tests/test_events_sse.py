@@ -323,3 +323,30 @@ def test_emit_between_cursor_read_and_event_list_is_left_for_the_stream(client, 
         assert int(ev_id) > int(snap_id) and ev["status"] == "hold"
         for _ in range(3):
             assert next(messages)[1]["type"] == "heartbeat"
+
+
+def test_publish_to_a_dead_subscriber_loop_drops_it_without_raising(client):
+    import asyncio
+
+    bus = client.app.state.bus
+    loop = asyncio.new_event_loop()
+    loop.close()
+    from app.events import Subscription, Viewer
+
+    dead = Subscription(viewer=Viewer("mary", "owner", "mary"), loop=loop, queue=asyncio.Queue())
+    bus._subs.add(dead)
+    row = emit_to(client, "task_updated", {"status": "calling"}, "contact")
+    assert row.id is not None
+    assert dead not in bus._subs, "a subscriber whose loop is closed is dropped, and emit still returned the committed row"
+
+
+def test_contact_projection_drops_owner_sms_text(client):
+    emit_to(client, "booked", {"calendar": "Appointment · Thu", "sms_user": "LifeLine: Booked ... $95 with Delta Dental."}, "contact")
+    emit_to(client, "notified", {"sms_contact": "LifeLine: Thank you.", "sms_user": "LifeLine: Sarah will drive you."}, "contact")
+    owner = client.get("/api/tasks/t1/events?viewer_id=mary").json()
+    contact = client.get("/api/tasks/t1/events?viewer_id=sarah").json()
+    assert owner[0]["sms_user"].endswith("Delta Dental.") and owner[1]["sms_user"]
+    assert contact[0]["sms_user"] == "" and contact[0]["calendar"] == "Appointment · Thu"
+    assert "sms_user" not in contact[1] and contact[1]["sms_contact"] == "LifeLine: Thank you."
+    for event in owner + contact:
+        schema_valid(event)
