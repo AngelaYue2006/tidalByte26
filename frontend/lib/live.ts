@@ -78,6 +78,35 @@ export async function bootstrapSession(): Promise<void> {
   }
 }
 
+/**
+ * Testable live session: same snapshot / id-dedupe rules as EventSource.
+ * Used for T11 (refresh mid-run restores from snapshot, no duplicates).
+ */
+export class LiveSession {
+  private gate: StreamGate;
+  readonly applied: LiveEvent[] = [];
+
+  constructor() {
+    this.gate = createGate({
+      onEvent: (event) => {
+        this.applied.push(event);
+      },
+    });
+  }
+
+  get state(): DashboardState {
+    return this.gate.state;
+  }
+
+  get seenIds(): string[] {
+    return [...this.gate.seen];
+  }
+
+  push(event: LiveEvent, id: string | null = null): void {
+    this.gate.apply(event, id);
+  }
+}
+
 function connectSse(viewerId: string, handlers: LiveHandlers): () => void {
   const gate = createGate(handlers);
   let source: EventSource | null = null;
