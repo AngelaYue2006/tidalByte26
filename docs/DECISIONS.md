@@ -35,11 +35,11 @@
 
 ## Open items to verify at kickoff
 
-- Exact NVIDIA model IDs for Lightning and Super, and whether the chat endpoint supports `stream: true`.
+- [x] Exact NVIDIA model IDs for Lightning and Super (recorded in `.env.example` on 2026-11-21, #52): `nvidia/nemotron-3.5-lightning-30b-a3b` and `nvidia/nemotron-3-super-120b-a12b`, both on build.nvidia.com behind the OpenAI-compatible endpoint `https://integrate.api.nvidia.com/v1`. The API reference lists `stream` as a request field; confirming it with one real request still needs `NVIDIA_API_KEY` in `.env`.
 - ElevenLabs: custom LLM configuration, outbound call API, concurrent call limit on the team's plan.
 - Twilio trial: all three teammate numbers verified; SMS webhook reachable through the tunnel.
 - Google Cloud project with Calendar, Places and Distance Matrix enabled; OAuth test user added.
-- Ollama with a 4-bit Nemotron Nano pulled on the demo laptop.
+- Ollama with a 4-bit Nemotron Nano pulled on the demo laptop. Tag chosen (#52): `nemotron-3-nano:4b-q4_K_M`, the 4-bit GGUF of Nemotron 3 Nano 4B, because the 30B-A3B variant is about 18 GB at 4-bit and too heavy for a laptop demo. Still to do on the laptop: `ollama pull nemotron-3-nano:4b-q4_K_M`, then one completion under 3 s.
 
 ## Open items from the shared schemas (#2)
 
