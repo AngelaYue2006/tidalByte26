@@ -33,24 +33,33 @@ def pytest_collect_file(file_path: Path, parent):
     return None
 
 
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
+_LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    """Mock mode means no socket leaves this machine: not the raw utterance, not anything else (T2).
+    """Mock mode means no socket leaves this process: not the raw utterance, not anything else (T2).
 
-    Only a loopback address may connect: asyncio on Windows wires its event loop with an internal socket pair
-    (`socket.socketpair` falls back to a 127.0.0.1 connect there), and TestClient cannot start without it. Every other
-    address is refused, so a vendor SDK or a cloud model call fails the test instead of leaving the process."""
-    real_connect = socket.socket.connect
+    The one connect allowed is to a loopback port this process bound itself: asyncio on Windows builds its wake-up
+    socketpair that way (bind, listen, connect to the bound port), and TestClient cannot start without it. Ollama on
+    localhost:11434 or anything else on the machine is still refused, because this process never bound that port."""
+    original_connect, original_bind = socket.socket.connect, socket.socket.bind
+    own_loopback_ports: set[int] = set()
 
-    def loopback_only(sock, address, *args, **kwargs):
-        if isinstance(address, tuple) and address and address[0] in LOOPBACK_HOSTS:
-            return real_connect(sock, address, *args, **kwargs)
-        raise AssertionError(f"a scenario test attempted network access to {address!r}; every adapter must be in mock mode")
+    def bind(self, address):
+        result = original_bind(self, address)
+        name = self.getsockname()
+        if isinstance(name, tuple) and name[0] in _LOOPBACK:
+            own_loopback_ports.add(name[1])
+        return result
 
-    monkeypatch.setattr(socket.socket, "connect", loopback_only)
+    def connect(self, address):
+        if isinstance(address, tuple) and address[0] in _LOOPBACK and address[1] in own_loopback_ports:
+            return original_connect(self, address)
+        raise AssertionError("a scenario test attempted network access; every adapter must be in mock mode")
+
+    monkeypatch.setattr(socket.socket, "bind", bind)
+    monkeypatch.setattr(socket.socket, "connect", connect)
 
 
 @pytest.fixture

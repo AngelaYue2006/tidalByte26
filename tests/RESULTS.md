@@ -2,7 +2,7 @@
 
 **Commit tested:** `6441ed5` on `main` (backend with approvals and the Twilio SMS webhook from #22, receipts and demo reset from #24, the Nano-written contact request and contact reply handling from #23, integrations, shared and fixtures as merged on 2026-11-21).
 **Command:** `pytest -q tests/` from the repo root in the shared venv; `scripts/check.sh` ran the same files with the
-backend and integrations suites. Every adapter in mock mode; no socket left the process.
+backend and integrations suites. Every adapter in mock mode; the only socket connect allowed is to a loopback port this process bound itself (asyncio on Windows), so nothing left the machine. Inbound SMS is mock form handling without a Twilio signature; the ElevenLabs post-call replay is signed.
 
 **Summary:** 54 passed, nothing skipped or expected to fail (23 scenario tests, all green). Pass means the scenario's
 expected result from `docs/MVP.md` holds against the merged backend.

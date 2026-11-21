@@ -24,8 +24,21 @@ scripts/check.sh                      # runs them with the backend and integrati
 - Each test drives the app through its REST routes and reads back `GET /api/tasks/{id}`, `GET /api/tasks/{id}/events`
   for both viewer roles and the `GET /api/live` snapshot, validating against `shared/*.schema.json`.
 
-## Scenarios that wait on another PR
+## Scenarios and unmerged work
 
 A test for a route or behaviour that is not merged yet is written to the contract in `docs/ARCHITECTURE.md` and marked
-`xfail` with the issue number in the reason (T10 SMS NO → #23). When the PR merges the test turns `XPASS`; remove the marker in the same PR or the next refresh of
-this folder, and update `RESULTS.md`.
+`xfail` with the issue number in the reason; when the PR merges the test turns `XPASS`, and the marker comes off in the
+next refresh of this folder together with `RESULTS.md`. As of main `6441ed5` nothing is marked: T10's SMS decline was the
+last one and passes since #23 merged.
+
+## What the webhook scenarios exercise
+
+- **Twilio SMS (T6, T8, T9, T10):** `Lab.twilio_sms` posts the form Twilio would post, with no `X-Twilio-Signature`.
+  `SMS_MODE=mock` means `integrations.sms_twilio.parse_inbound` verifies the sender against the fixture people and the
+  allowlist, not a signature, so these scenarios cover form handling, allowlist, MessageSid replay and the YES/NO
+  branches; the live signature check is #27's and is tested there.
+- **ElevenLabs post-call (T8):** `Lab.post_call_webhook` signs the replayed payload with `ELEVENLABS_WEBHOOK_SECRET`
+  the way ElevenLabs does, so the signed path is exercised.
+- **No socket leaves the process.** `conftest.py` replaces `socket.connect` for every scenario. The one connect allowed
+  is to a loopback port this process bound itself, which is how asyncio on Windows builds its wake-up socketpair;
+  anything else on the machine, Ollama on `localhost:11434` included, is refused.
