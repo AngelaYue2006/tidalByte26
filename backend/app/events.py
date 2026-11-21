@@ -149,9 +149,13 @@ def emit(engine: Engine, bus: EventBus, task_id: str, type: str, payload: dict, 
     return row
 
 
-def list_events(session: Session, task_id: str, viewer: Viewer) -> list[dict]:
-    """Ordered events for one task, filtered by what the viewer's role may see."""
-    rows = session.exec(select(Event).where(Event.task_id == task_id).order_by(Event.id)).all()
+def list_events(session: Session, task_id: str, viewer: Viewer, *, up_to: int | None = None) -> list[dict]:
+    """Ordered events for one task, filtered by what the viewer's role may see. `up_to` bounds the list to ids at or
+    below a cursor so a snapshot and the stream that follows it agree on what has been applied."""
+    query = select(Event).where(Event.task_id == task_id).order_by(Event.id)
+    if up_to is not None:
+        query = query.where(Event.id <= up_to)
+    rows = session.exec(query).all()
     return [project_event(row, viewer.role) for row in rows if visible_to(viewer.role, row.visibility)]
 
 

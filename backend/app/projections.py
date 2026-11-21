@@ -59,11 +59,13 @@ def latest_task(session: Session, owner_id: str) -> Task | None:
 def snapshot(engine: Engine, viewer: Viewer) -> dict:
     """The first SSE message: the viewer's current task, its calls and the events they may see. `cursor` is the owner's highest event id, the stream's starting point; it is popped before sending."""
     with Session(engine) as session:
+        # The cursor is read first and every later read is bounded by it, so an event committed while the snapshot is
+        # being built is left for the stream's first catch-up batch and is never both in the snapshot and re-sent.
         cursor = last_event_id(session, viewer.owner_id)
         task = latest_task(session, viewer.owner_id)
         if task is None:
             return {"type": "snapshot", "task": None, "calls": [], "events": [], "cursor": cursor}
-        events = list_events(session, task.id, viewer)
+        events = list_events(session, task.id, viewer, up_to=cursor)
         calls = session.exec(select(Call).where(Call.task_id == task.id).order_by(Call.started_at, Call.id)).all()
         return {
             "type": "snapshot",

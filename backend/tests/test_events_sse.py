@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from app import projections
 from app.config import load_settings
 from app.events import (
     EVENT_TYPES,
@@ -297,3 +298,26 @@ def test_project_event_variants_are_schema_valid():
     schema_valid(contact)
     assert owner["at"].endswith("+00:00")
     assert Viewer("sarah", "contact", "mary").role == "contact"
+
+
+def test_emit_between_cursor_read_and_event_list_is_left_for_the_stream(client, monkeypatch):
+    """A commit that lands after the snapshot's cursor is read but before its event list is loaded must not be in the
+    snapshot (its id is above the cursor) and must arrive exactly once on the stream."""
+    emit_to(client, "request", {"text": RAW, "chips": CHIPS}, "contact")
+    real_last_event_id = projections.last_event_id
+
+    def cursor_then_emit(session, owner_id):
+        cursor = real_last_event_id(session, owner_id)
+        emit_to(client, "call_status", {"call_id": "a", "status": "hold"}, "contact")  # between the two reads
+        return cursor
+
+    monkeypatch.setattr(projections, "last_event_id", cursor_then_emit)
+    with client.stream("GET", "/api/live?viewer_id=mary") as resp:
+        messages = sse_messages(resp.iter_lines())
+        snap_id, snap = next(messages)
+        assert [e["type"] for e in snap["events"]] == ["request"], "the in-between event is not in the snapshot"
+        assert all(e["id"] <= int(snap_id) for e in snap["events"])
+        ev_id, ev = until(messages, lambda m: m[1]["type"] == "call_status")
+        assert int(ev_id) > int(snap_id) and ev["status"] == "hold"
+        for _ in range(3):
+            assert next(messages)[1]["type"] == "heartbeat"
