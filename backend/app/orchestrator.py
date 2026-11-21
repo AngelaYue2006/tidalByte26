@@ -37,6 +37,15 @@ APPROVAL_WINDOW = timedelta(minutes=10)
 CALL_IDS = "abcdefghij"
 
 
+BOOKING_KEYS = ("clinic", "slot_start", "slot_end", "price", "status", "confirmation_ref", "calendar_event_id")
+
+
+def booking_record(booking: Booking) -> dict:
+    """The booking as shared/task.schema.json documents it: the seven keys, nothing the adapter type adds (such as address)."""
+    data = booking.model_dump(mode="json")
+    return {key: data.get(key) for key in BOOKING_KEYS}
+
+
 class PipelineFailure(Exception):
     """A step could not complete. `code` is one of the error codes in docs/ARCHITECTURE.md."""
 
@@ -65,8 +74,11 @@ class Pipeline:
         self.engine = engine
         self.bus = bus
         self._waits: dict[str, asyncio.Event] = {}
+        self._claimed: set[str] = set()
         self._tasks: dict[str, asyncio.Task] = {}
-        self.request_keys: dict[str, str] = {}  # idempotency_key -> task_id, until #24 persists receipts
+        # Idempotency, in process until #24 persists receipts: request keys -> task id, and per-route replies by key.
+        self.request_keys: dict[str, str] = {}
+        self.replies: dict[tuple[str, str, str], dict] = {}
 
     # ---- entry points -------------------------------------------------------------------------------------------
 
@@ -74,6 +86,16 @@ class Pipeline:
         task = asyncio.get_running_loop().create_task(self.run(task_id, text), name=f"pipeline:{task_id}")
         self._tasks[task_id] = task
         return task
+
+    def claim_wait(self, task_id: str) -> bool:
+        """Take the one answer a wait accepts. True once; False when nothing is waiting or it was already claimed.
+
+        The routes run on the single server loop with no await between claim and emit, so the claim is atomic.
+        """
+        if task_id not in self._waits or task_id in self._claimed:
+            return False
+        self._claimed.add(task_id)
+        return True
 
     def resume(self, task_id: str) -> bool:
         """Release the wait a POST has satisfied. False when nothing is waiting for this task."""
@@ -84,7 +106,14 @@ class Pipeline:
         return True
 
     def waiting(self, task_id: str) -> bool:
-        return task_id in self._waits
+        return task_id in self._waits and task_id not in self._claimed
+
+    def replay(self, route: str, task_id: str, key: str) -> dict | None:
+        return self.replies.get((route, task_id, key))
+
+    def remember(self, route: str, task_id: str, key: str, response: dict) -> dict:
+        self.replies[(route, task_id, key)] = response
+        return response
 
     # ---- the ten steps -------------------------------------------------------------------------------------------
 
@@ -142,17 +171,19 @@ class Pipeline:
         origin = run.owner.home.address if run.owner.home else "near home"
         distances = {d.place_id: d for d in self.deps.drive(origin, run.clinics)}
         wire_request = WireIntakeRequest(**intake.model_dump(exclude={"time_range"}), time_range=Window(start=intake.time_range.start, end=intake.time_range.end))
+        # One id per call, unique across tasks, used everywhere: the calls table, every event, the decision and the snapshot.
         run.specs = {}
         with session_scope(self.engine) as session:
-            for call_id, clinic in zip(CALL_IDS, run.clinics, strict=False):
+            for letter, clinic in zip(CALL_IDS, run.clinics, strict=False):
+                call_id = f"{run.task_id[:8]}-{letter}"
                 distance = distances.get(clinic.place_id)
                 run.specs[call_id] = CallSpec(clinic=clinic, request=wire_request, windows=run.windows, call_id=call_id)
-                session.add(Call(id=f"{run.task_id}:{call_id}", task_id=run.task_id, clinic_name=clinic.name, clinic_phone=clinic.phone_e164,
+                session.add(Call(id=call_id, task_id=run.task_id, clinic_name=clinic.name, clinic_phone=clinic.phone_e164,
                                  distance_mi=distance.miles if distance else None, status="dialing", started_at=datetime.now(UTC)))
-        for call_id, clinic in zip(CALL_IDS, run.clinics, strict=False):
-            distance = distances.get(clinic.place_id)
+        for call_id, spec in run.specs.items():
+            distance = distances.get(spec.clinic.place_id)
             meta = f"{distance.miles:g} mi · {distance.minutes:g} min" if distance else ""
-            self._emit(run, "call_start", {"call_id": call_id, "clinic": clinic.name, "meta": meta, "simulated": clinic.simulated}, "contact")
+            self._emit(run, "call_start", {"call_id": call_id, "clinic": spec.clinic.name, "meta": meta, "simulated": spec.clinic.simulated}, "contact")
 
     async def _calling(self, run: Run) -> None:
         self._set_status(run, "calling")
@@ -168,14 +199,14 @@ class Pipeline:
         call_id = event.get("call_id")
         if type_ == "call_status":
             with session_scope(self.engine) as session:
-                call = session.get(Call, f"{run.task_id}:{call_id}")
+                call = session.get(Call, call_id)
                 if call is not None:
                     call.status = event["status"]
                     if event["status"] == "done":
                         call.ended_at = datetime.now(UTC)
         elif type_ == "call_result":
             with session_scope(self.engine) as session:
-                call = session.get(Call, f"{run.task_id}:{call_id}")
+                call = session.get(Call, call_id)
                 if call is not None:
                     call.result_json = json.dumps({k: event[k] for k in ("price", "slot", "insured", "slotOk") if k in event})
         self._emit(run, type_, event, "contact")
@@ -232,7 +263,7 @@ class Pipeline:
         else:
             payload = {"calendar": "", "sms_user": texts.tentative_sms(winner.clinic, winner.slot_start), "tentative": True, "simulated": confirmation.simulated}
         with session_scope(self.engine) as session:
-            session.get(Task, run.task_id).booking_json = run.booking.model_dump_json()
+            session.get(Task, run.task_id).booking_json = json.dumps(booking_record(run.booking))
         self._sms(run, run.owner.phone_e164, payload["sms_user"], "booked")
         self._emit(run, "booked", payload, "contact")
 
@@ -291,6 +322,7 @@ class Pipeline:
             await event.wait()
         finally:
             self._waits.pop(task_id, None)
+            self._claimed.discard(task_id)
 
     def _set_status(self, run: Run, status: str) -> None:
         with session_scope(self.engine) as session:

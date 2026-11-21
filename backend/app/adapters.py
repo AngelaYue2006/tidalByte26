@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 from app.config import Settings
 from app.nemotron import local_intake, ranker
+from app.voice_replay import FixtureReplay
 from integrations import (
     google_calendar,
     google_distance,
@@ -38,23 +39,41 @@ class VoiceAdapter(Protocol):
 
 
 class VoiceMockBridge:
-    """Adapts integrations.voice_mock (#13) to VoiceAdapter once it has merged; until then it says so plainly."""
+    """The default voice path for VOICE_MODE=mock.
 
-    async def call_clinics(self, specs: list[CallSpec], on_event: OnEvent) -> list[Offer]:
+    Uses integrations.voice_mock (#13) when that module has merged, else the backend's own FixtureReplay of the same
+    receptionists.json. Either way every event is simulated and nothing is dialled. `sleep` lets tests run the
+    fixture timing instantly; the app uses the real clock.
+    """
+
+    def __init__(self, sleep=None) -> None:
+        self._sleep = sleep
+        self._replay: FixtureReplay | None = None
+
+    def _simulator(self):
         from integrations import voice_mock
 
-        if not hasattr(voice_mock, "callbacks"):
-            raise RuntimeError("VOICE_MODE=mock needs the receptionist simulator from integrations/voice_mock.py (#13)")
-        async with voice_mock.callbacks(on_event) as session:
+        return voice_mock if hasattr(voice_mock, "callbacks") and hasattr(voice_mock, "confirm_booking") else None
+
+    def _fallback(self) -> FixtureReplay:
+        if self._replay is None:
+            self._replay = FixtureReplay(self._sleep) if self._sleep else FixtureReplay()
+        return self._replay
+
+    async def call_clinics(self, specs: list[CallSpec], on_event: OnEvent) -> list[Offer]:
+        simulator = self._simulator()
+        if simulator is None:
+            return await self._fallback().call_clinics(specs, on_event)
+        kwargs = {"sleep": self._sleep} if self._sleep else {}
+        async with simulator.callbacks(on_event, **kwargs) as session:
             handles = [session.start_call(spec) for spec in specs]
             return [await session.wait_call(handle) for handle in handles]
 
     def confirm_booking(self, spec: CallSpec, slot: dict) -> Confirmation:
-        from integrations import voice_mock
-
-        if not hasattr(voice_mock, "confirm_booking"):
-            raise RuntimeError("VOICE_MODE=mock needs the receptionist simulator from integrations/voice_mock.py (#13)")
-        return voice_mock.confirm_booking(spec, slot)
+        simulator = self._simulator()
+        if simulator is None:
+            return self._fallback().confirm_booking(spec, slot)
+        return simulator.confirm_booking(spec, slot)
 
 
 @dataclass

@@ -34,9 +34,12 @@ async def approve(task_id: str, body: ApprovalBody, request: Request) -> dict:
         if task.owner_id != body.actor_id:
             raise HTTPException(status_code=403, detail="only the owner can approve")
         status = task.status
-    if status != "awaiting_approval":
-        if status in ("booking", "transport", "awaiting_contact", "completed") and body.decision == "approve":
-            return {"status": status, "applied": False}  # already approved: idempotent
+    replayed = pipeline.replay("approve", task_id, body.idempotency_key)
+    if replayed is not None:
+        return replayed  # the same key again: the same answer, nothing re-applied
+    if status != "awaiting_approval" or not pipeline.claim_wait(task_id):
+        if status in ("awaiting_approval", "booking", "transport", "awaiting_contact", "completed") and body.decision == "approve":
+            return {"status": status, "applied": False}  # already approved (or being applied): idempotent
         raise HTTPException(status_code=409, detail=f"task is {status}, not awaiting approval")
     if body.decision == "approve":
         emit(engine, bus, task_id, "approved", {"by": body.actor_id, "via": "dashboard"}, "contact")
@@ -45,4 +48,4 @@ async def approve(task_id: str, body: ApprovalBody, request: Request) -> dict:
             transition(session.get(Task, task_id), "cancelled")
         emit(engine, bus, task_id, "task_updated", {"status": "cancelled", "reason": "REJECTED_BY_OWNER"}, "contact")
     pipeline.resume(task_id)
-    return {"status": "approved" if body.decision == "approve" else "cancelled", "applied": True}
+    return pipeline.remember("approve", task_id, body.idempotency_key, {"status": "approved" if body.decision == "approve" else "cancelled", "applied": True})

@@ -36,17 +36,23 @@ async def contact_offer(body: OfferBody, request: Request) -> dict:
         if task is None or contact is None or contact.owner_id != task.owner_id:
             raise HTTPException(status_code=404, detail="task not found")
         status, name, booking_json = task.status, contact.name, task.booking_json
-    if status != "awaiting_contact":
+    replayed = pipeline.replay("contact_offer", body.task_id, body.idempotency_key)
+    if replayed is not None:
+        return replayed  # the same key again: the same answer, no second reply or confirmation
+    if status != "awaiting_contact" or not pipeline.waiting(body.task_id):
         raise HTTPException(status_code=409, detail=f"task is {status}, not awaiting the contact")
     first = name.split()[0]
-    text = "I can drive." if body.offer.can_drive else "I can't drive this time."
-    emit(engine, bus, body.task_id, "contact_reply", {"contact": first, "text": text, "offer": body.offer.model_dump()}, "contact")
     if not body.offer.can_drive:
-        return {"status": "awaiting_contact", "ride": "declined"}
+        # A decline is recorded once per key and the task keeps waiting (T10); the wait stays open for a later offer.
+        emit(engine, bus, body.task_id, "contact_reply", {"contact": first, "text": "I can't drive this time.", "offer": body.offer.model_dump()}, "contact")
+        return pipeline.remember("contact_offer", body.task_id, body.idempotency_key, {"status": "awaiting_contact", "ride": "declined"})
+    if not pipeline.claim_wait(body.task_id):
+        raise HTTPException(status_code=409, detail="a ride for this task was already confirmed")
+    emit(engine, bus, body.task_id, "contact_reply", {"contact": first, "text": "I can drive.", "offer": body.offer.model_dump()}, "contact")
     pickup = body.offer.pickup_time or _default_pickup(booking_json)
     emit(engine, bus, body.task_id, "ride_confirmed", {"driver": first, "pickup_time": pickup}, "contact")
     pipeline.resume(body.task_id)
-    return {"status": "ride_confirmed", "pickup_time": pickup}
+    return pipeline.remember("contact_offer", body.task_id, body.idempotency_key, {"status": "ride_confirmed", "pickup_time": pickup})
 
 
 def _default_pickup(booking_json: str | None) -> str:
