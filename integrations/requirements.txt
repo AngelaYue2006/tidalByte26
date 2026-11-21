@@ -1,0 +1,7 @@
+elevenlabs
+twilio
+google-api-python-client
+google-auth-oauthlib
+googlemaps
+httpx
+pydantic

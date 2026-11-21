@@ -1,0 +1,1 @@
+"""Nemotron Super. rank(offers, windows, priority) -> Decision JSON {winner_call_id, score, reasons, second, tradeoff, ranked}. Also summarize_call(transcript) -> CallResult when data collection is incomplete."""

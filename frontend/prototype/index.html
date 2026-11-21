@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LifeLine · dashboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
+<style>
+  :root {
+    --bg: #f6f7f4; --card: #fff; --line: #e3e5df; --ink: #1d2320; --muted: #5d655f; --faint: #8a918b;
+    --accent: #2f6fd6; --accent-bg: #e8f0fc; --good: #2f7d32; --good-bg: #e7f3e5;
+    --warn: #9a6400; --warn-bg: #fbf0d9; --bad: #b3261e; --chip: #eef0ea; --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 20px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 600; }
+  .brand i { color: var(--accent); font-size: 24px; }
+  .controls { display: flex; gap: 8px; align-items: center; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  button:disabled { opacity: .5; cursor: default; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; }
+  .row { display: flex; gap: 12px; align-items: flex-start; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { background: var(--chip); color: var(--muted); border-radius: 8px; padding: 2px 9px; font-size: 12px; }
+  .chip.good { background: var(--good-bg); color: var(--good); }
+  .chip.accent { background: var(--accent-bg); color: var(--accent); }
+  .muted { color: var(--muted); } .faint { color: var(--faint); }
+  .calls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .call { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; min-height: 270px; }
+  .call.winner { border: 2px solid var(--accent); }
+  .call h3 { margin: 0; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
+  .status { font-size: 12px; font-weight: 500; }
+  .status.dialing { color: var(--faint); } .status.live { color: var(--accent); }
+  .status.hold { color: var(--warn); } .status.done { color: var(--good); }
+  .transcript { flex: 1; background: var(--chip); border-radius: 8px; padding: 8px; margin: 8px 0; font-size: 12.5px; overflow-y: auto; max-height: 230px; }
+  .line { margin-bottom: 4px; animation: fade .3s; }
+  .line b { font-weight: 600; }
+  .result { display: grid; grid-template-columns: repeat(3, 1fr); font-size: 12.5px; gap: 4px; }
+  .result div { background: var(--bg); border-radius: 6px; padding: 4px 6px; }
+  .result small { display: block; color: var(--faint); font-size: 11px; }
+  .bad { color: var(--bad); } .good { color: var(--good); }
+  .decision h2, .confirm h2 { margin: 0 0 6px; font-size: 15px; display: flex; gap: 8px; align-items: center; }
+  .decision h2 i { color: var(--accent); }
+  .confirms { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .confirm { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .confirm h2 { font-size: 13px; color: var(--muted); font-weight: 500; }
+  .hidden { display: none; }
+  .pulse { animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .4; } }
+  @keyframes fade { from { opacity: 0; transform: translateY(3px); } }
+  @media (max-width: 800px) { .calls, .confirms { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><i class="ti ti-calendar-check"></i>LifeLine</div>
+    <div class="controls">
+      <label class="muted"><input type="checkbox" id="audioToggle" checked /> Play recordings</label>
+      <button id="liveBtn" title="Connect to the backend WebSocket">Go live</button>
+      <button id="resetBtn">Reset</button>
+      <button id="playBtn" class="primary"><i class="ti ti-player-play"></i> Play demo</button>
+    </div>
+  </header>
+
+  <!-- 1. Request -->
+  <div class="card">
+    <div class="row">
+      <i class="ti ti-microphone muted" style="font-size:20px;margin-top:2px"></i>
+      <div style="flex:1">
+        <div class="faint" style="font-size:12px" id="userName">Mary Johnson · emergency contact: Sarah (daughter)</div>
+        <div id="requestText" class="muted">Waiting for a request…</div>
+        <div class="chips" id="requestChips"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Parallel calls -->
+  <div class="calls" id="calls"></div>
+
+  <!-- 3. Decision -->
+  <div class="card decision hidden" id="decision">
+    <h2><i class="ti ti-sparkles"></i><span id="decisionTitle"></span></h2>
+    <div class="chips" id="reasonChips"></div>
+    <p class="muted" id="tradeoff" style="margin:8px 0 10px"></p>
+    <div class="faint" style="font-size:12px">Ranked by Nemotron 3 Super after hard-rule filtering (budget, free time, insurance).</div>
+  </div>
+
+  <!-- 4. Confirmations -->
+  <div class="confirms hidden" id="confirms">
+    <div class="confirm"><h2><i class="ti ti-message"></i>Text to Mary</h2><div id="smsUser"></div></div>
+    <div class="confirm"><h2><i class="ti ti-calendar"></i>Google Calendar</h2><div id="calEvent"></div></div>
+    <div class="confirm"><h2><i class="ti ti-heart-handshake"></i>Text to Sarah (emergency contact)</h2><div id="smsContact"></div></div>
+  </div>
+</div>
+
+<script>
+/* ------------------------------------------------------------------
+   EVENT CONTRACT — the backend sends these same events over the
+   WebSocket in live mode; the demo replays them from SCENARIO.
+   { type: "request", text, chips: [..] }
+   { type: "call_start", call_id, clinic, meta }
+   { type: "call_status", call_id, status: "dialing"|"live"|"hold"|"done" }
+   { type: "transcript", call_id, speaker: "agent"|"clinic", text, audio? }
+   { type: "call_result", call_id, price, slot, insured, slotOk }
+   { type: "decision", winner, title, reasons: [..], second: [..], tradeoff }
+   { type: "booked", calendar, sms_user }
+   { type: "notified", sms_contact }
+   ------------------------------------------------------------------ */
+
+// at = ms from start. audio = optional prerecorded clip in ./audio/.
+// Lines without audio advance on timing alone.
+const SCENARIO = [
+  { at: 0, type: "request", text: "“I need a dental cleaning this week, under $150. I have Delta Dental.”",
+    chips: ["Dental cleaning", "Max $150", "Delta Dental", "Free: Tue pm, Thu am", "!Processed on device"] },
+  { at: 1200, type: "call_start", call_id: "a", clinic: "Bright Smile Dental", meta: "1.2 mi" },
+  { at: 1300, type: "call_start", call_id: "b", clinic: "Smile Co.", meta: "0.6 mi" },
+  { at: 1400, type: "call_start", call_id: "c", clinic: "Oak Dental", meta: "3.4 mi" },
+  { at: 2600, type: "call_status", call_id: "a", status: "live" },
+  { at: 2900, type: "call_status", call_id: "b", status: "live" },
+  { at: 3300, type: "call_status", call_id: "c", status: "hold" },
+  { at: 3000, type: "transcript", call_id: "a", speaker: "agent", text: "Hi, I'm an AI assistant calling for a patient. Do you take Delta Dental?", audio: "audio/a1.mp3" },
+  { at: 3600, type: "transcript", call_id: "b", speaker: "agent", text: "Hi, I'm an AI assistant calling for a patient. Any cleanings open this week?", audio: "audio/b1.mp3" },
+  { at: 3800, type: "transcript", call_id: "c", speaker: "clinic", text: "Thanks for calling Oak Dental, please hold…" },
+  { at: 5600, type: "transcript", call_id: "a", speaker: "clinic", text: "Yes, we do. A cleaning is $95 with Delta.", audio: "audio/a2.mp3" },
+  { at: 6400, type: "transcript", call_id: "b", speaker: "clinic", text: "Our next opening is Friday at 4. It's $120 with Delta.", audio: "audio/b2.mp3" },
+  { at: 7600, type: "transcript", call_id: "a", speaker: "agent", text: "Great. Anything Tuesday afternoon or Thursday morning?", audio: "audio/a3.mp3" },
+  { at: 8400, type: "transcript", call_id: "b", speaker: "agent", text: "Thanks, I'll check with the patient and call back." },
+  { at: 8900, type: "call_result", call_id: "b", price: "$120", slot: "Fri 4:00", insured: true, slotOk: false },
+  { at: 9000, type: "call_status", call_id: "b", status: "done" },
+  { at: 9800, type: "transcript", call_id: "a", speaker: "clinic", text: "Thursday at 9:30 is open.", audio: "audio/a4.mp3" },
+  { at: 10600, type: "transcript", call_id: "a", speaker: "agent", text: "Perfect, please hold that for Mary Johnson. Thank you!" },
+  { at: 11200, type: "call_result", call_id: "a", price: "$95", slot: "Thu 9:30", insured: true, slotOk: true },
+  { at: 11300, type: "call_status", call_id: "a", status: "done" },
+  { at: 11600, type: "call_status", call_id: "c", status: "live" },
+  { at: 11800, type: "transcript", call_id: "c", speaker: "clinic", text: "Sorry for the wait. We're $140, earliest is next Monday." },
+  { at: 12800, type: "call_result", call_id: "c", price: "$140", slot: "Mon 10:00", insured: true, slotOk: false },
+  { at: 12900, type: "call_status", call_id: "c", status: "done" },
+  { at: 14000, type: "decision", winner: "a", title: "Why Nemotron picked Bright Smile Dental",
+    reasons: ["Fits your free time · Thu 9:30", "Cheapest · $95 vs $120, $140", "Takes Delta Dental"],
+    second: ["2nd closest · 1.2 mi"],
+    tradeoff: "Trade-off: Smile Co. is closer (0.6 mi), but its only opening is Friday at 4, when your calendar is busy." },
+  { at: 15500, type: "booked",
+    sms_user: "LifeLine: Booked Bright Smile Dental, Thu Nov 26, 9:30 AM, $95 with Delta. Reply C to cancel.",
+    calendar: "<b>Appointment</b><br><span class='muted'>Thu Nov 26 · 9:30–10:30 AM<br>123 Main St · private · reminder 1 day before</span>" },
+  { at: 16800, type: "notified",
+    sms_contact: "LifeLine: Appointment booked for Mary — Bright Smile Dental, Thu Nov 26 at 9:30 AM, 123 Main St." },
+];
+
+const $ = (id) => document.getElementById(id);
+const callsEl = $("calls");
+let timers = [], ws = null;
+
+const STATUS_LABEL = { dialing: "Dialing…", live: "Live", hold: "On hold", done: "Done" };
+
+function chip(text, cls = "") { return `<span class="chip ${cls}">${text}</span>`; }
+
+function handle(ev) {
+  switch (ev.type) {
+    case "request":
+      $("requestText").className = "";
+      $("requestText").textContent = ev.text;
+      $("requestChips").innerHTML = ev.chips.map(c => c.startsWith("!")
+        ? chip(`<i class="ti ti-lock"></i> ${c.slice(1)}`, "good") : chip(c)).join("");
+      break;
+    case "call_start":
+      callsEl.insertAdjacentHTML("beforeend", `
+        <div class="call" id="call-${ev.call_id}">
+          <h3>${ev.clinic}<span class="status dialing pulse" id="st-${ev.call_id}">Dialing…</span></h3>
+          <div class="faint" style="font-size:12px">${ev.meta}</div>
+          <div class="transcript" id="tx-${ev.call_id}"></div>
+          <div class="result" id="res-${ev.call_id}">
+            <div><small>Price</small>—</div><div><small>Slot</small>—</div><div><small>Insurance</small>—</div>
+          </div>
+        </div>`);
+      break;
+    case "call_status": {
+      const s = $("st-" + ev.call_id);
+      s.className = `status ${ev.status} ${ev.status === "done" ? "" : "pulse"}`;
+      s.innerHTML = (ev.status === "done" ? '<i class="ti ti-check"></i> ' : "") + STATUS_LABEL[ev.status];
+      break;
+    }
+    case "transcript": {
+      const tx = $("tx-" + ev.call_id);
+      const who = ev.speaker === "agent" ? "Agent" : "Clinic";
+      tx.insertAdjacentHTML("beforeend", `<div class="line"><b>${who}:</b> ${ev.text}</div>`);
+      tx.scrollTop = tx.scrollHeight;
+      if (ev.audio && $("audioToggle").checked) {
+        const a = new Audio(ev.audio); a.play().catch(() => {}); // missing file = silent
+      }
+      break;
+    }
+    case "call_result":
+      $("res-" + ev.call_id).innerHTML = `
+        <div><small>Price</small>${ev.price}</div>
+        <div><small>Slot</small><span class="${ev.slotOk ? "good" : "bad"}">${ev.slot}</span></div>
+        <div><small>Insurance</small><span class="${ev.insured ? "good" : "bad"}">${ev.insured ? "Yes" : "No"}</span></div>`;
+      break;
+    case "decision":
+      $("call-" + ev.winner).classList.add("winner");
+      $("decisionTitle").textContent = ev.title;
+      $("reasonChips").innerHTML = ev.reasons.map(r => chip(r, "accent")).join("") + (ev.second || []).map(r => chip(r)).join("");
+      $("tradeoff").textContent = ev.tradeoff;
+      $("decision").classList.remove("hidden");
+      break;
+    case "booked":
+      $("smsUser").textContent = ev.sms_user;
+      $("calEvent").innerHTML = ev.calendar;
+      $("confirms").classList.remove("hidden");
+      $("smsContact").innerHTML = '<span class="faint pulse">Sending…</span>';
+      break;
+    case "notified":
+      $("smsContact").textContent = ev.sms_contact;
+      break;
+  }
+}
+
+function reset() {
+  timers.forEach(clearTimeout); timers = [];
+  callsEl.innerHTML = "";
+  $("requestText").className = "muted"; $("requestText").textContent = "Waiting for a request…";
+  $("requestChips").innerHTML = "";
+  $("decision").classList.add("hidden"); $("confirms").classList.add("hidden");
+}
+
+function playDemo() {
+  reset();
+  for (const ev of SCENARIO) timers.push(setTimeout(() => handle(ev), ev.at));
+}
+
+function goLive() {
+  // Backend pushes the same events. Change the URL to your FastAPI server.
+  reset();
+  ws = new WebSocket("ws://localhost:8000/ws/dashboard");
+  ws.onmessage = (m) => handle(JSON.parse(m.data));
+  ws.onopen = () => $("liveBtn").textContent = "Live ●";
+  ws.onclose = () => $("liveBtn").textContent = "Go live";
+}
+
+$("playBtn").onclick = playDemo;
+$("resetBtn").onclick = reset;
+$("liveBtn").onclick = goLive;
+</script>
+</body>
+</html>

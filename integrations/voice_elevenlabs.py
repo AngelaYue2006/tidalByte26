@@ -1,0 +1,1 @@
+"""ElevenLabs Agents over Twilio. start_call(CallSpec) -> CallHandle via the outbound-call API with dynamic variables (call_id, clinic, redacted request, windows). confirm_booking(CallSpec, slot) -> Confirmation. Verify API shape and concurrency at kickoff."""

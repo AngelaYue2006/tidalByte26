@@ -1,0 +1,1 @@
+"""POST /v1/chat/completions. OpenAI-compatible proxy used by the ElevenLabs agent. Checks LLM_PROXY_SECRET, reads call_id from dynamic variables, streams Lightning, records turns, emits transcript events."""
