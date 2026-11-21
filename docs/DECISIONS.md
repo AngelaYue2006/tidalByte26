@@ -36,7 +36,7 @@
 ## Open items to verify at kickoff
 
 - Exact NVIDIA model IDs for Lightning and Super, and whether the chat endpoint supports `stream: true`.
-- ElevenLabs: verified in `docs/ELEVENLABS.md` (agent published, extra-body switch on, server URL is the base, Free plan with 4 concurrent calls and 15 minutes). Post-call webhook created and signed. Still open: the Twilio number import waits on Angela's credentials; the 15-minute cap needs an upgrade or mocked rehearsals.
+- ElevenLabs: verified in `docs/ELEVENLABS.md` (agent published, extra-body switch on, server URL is the base, Free plan with 4 concurrent calls and 15 minutes). Post-call webhook created and signed. Still open: the Twilio number import (#67, after #7); the 15-minute cap needs an upgrade or mocked rehearsals.
 - Twilio trial: all three teammate numbers verified; SMS webhook reachable through the tunnel.
 - Google Cloud project with Calendar, Places and Distance Matrix enabled; OAuth test user added.
 - Ollama with a 4-bit Nemotron Nano pulled on the demo laptop.

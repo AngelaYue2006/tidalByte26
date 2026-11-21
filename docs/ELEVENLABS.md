@@ -39,7 +39,7 @@ Response: `success`, `message`, `conversation_id` (store as `calls.external_ref`
 
 - Agent `LifeLine` created and published; first message and system prompt from `integrations/elevenlabs_agent_prompt.md`; Store Call Audio off (D14); data collection fields `price`, `slot`, `insured`, all strings.
 - Post-call webhook created at agent level, HMAC-signed, events `post_call_transcription` and `call_initiation_failure` only, pointed at `PUBLIC_BASE_URL/api/webhooks/elevenlabs/post-call` on Joyce's static ngrok domain. `ELEVENLABS_WEBHOOK_SECRET`, `ELEVENLABS_AGENT_ID`, `LLM_PROXY_SECRET` and `PUBLIC_BASE_URL` are set in her local `.env` only.
-- Pending: the Twilio number import (`ELEVENLABS_PHONE_NUMBER_ID`), which waits on Angela's Twilio credentials.
+- The Twilio number import (`ELEVENLABS_PHONE_NUMBER_ID`) is its own issue, #67, blocked on the Twilio verification in #7.
 
 ## Concurrency and minutes
 
