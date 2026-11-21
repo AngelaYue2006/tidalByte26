@@ -11,6 +11,8 @@ export type DecisionCardProps = {
   decision: NonNullable<DashboardState["decision"]>;
   approval?: DashboardState["approval"];
   taskId?: string;
+  /** Simple (grandma) view: title + Approve only, no reason stack. */
+  compact?: boolean;
 };
 
 function newKey(): string {
@@ -24,6 +26,7 @@ export default function DecisionCard({
   decision,
   approval,
   taskId,
+  compact = false,
 }: DecisionCardProps) {
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
@@ -52,29 +55,33 @@ export default function DecisionCard({
   }
 
   return (
-    <section className="card decision-card" aria-label="Decision">
+    <section className={compact ? "card decision-card decision-compact" : "card decision-card"} aria-label="Decision">
       <h2 className="decision-title">
         <IconSparkles size={22} stroke={1.75} aria-hidden />
         <span>{decision.title}</span>
       </h2>
 
-      <div className="chips" aria-label="Reasons">
-        {decision.reasons.map((r) => (
-          <span key={r} className="chip chip-accent">
-            {r}
-          </span>
-        ))}
-        {decision.second.map((r) => (
-          <span key={r} className="chip">
-            {r}
-          </span>
-        ))}
-      </div>
+      {!compact ? (
+        <>
+          <div className="chips" aria-label="Reasons">
+            {decision.reasons.map((r) => (
+              <span key={r} className="chip chip-accent">
+                {r}
+              </span>
+            ))}
+            {decision.second.map((r) => (
+              <span key={r} className="chip">
+                {r}
+              </span>
+            ))}
+          </div>
 
-      <p className="muted decision-tradeoff">{decision.tradeoff}</p>
-      <div className="faint decision-footer">
-        Ranked by Nemotron 3 Super after hard-rule filtering (budget, free time, insurance).
-      </div>
+          <p className="muted decision-tradeoff">{decision.tradeoff}</p>
+          <div className="faint decision-footer">
+            Ranked by Nemotron 3 Super after hard-rule filtering (budget, free time, insurance).
+          </div>
+        </>
+      ) : null}
 
       {needsApproval && approval?.pick ? (
         <div className="decision-pick faint">

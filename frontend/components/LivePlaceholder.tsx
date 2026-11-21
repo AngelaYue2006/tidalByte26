@@ -2,13 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import BookingHero from "@/components/BookingHero";
 import CallCard from "@/components/CallCard";
+import CallStrip from "@/components/CallStrip";
 import Confirmations from "@/components/Confirmations";
 import ContactReply from "@/components/ContactReply";
 import DecisionCard from "@/components/DecisionCard";
 import RequestBar from "@/components/RequestBar";
 import TransportCard from "@/components/TransportCard";
 import { foldEvents, type DashboardState } from "@/lib/dashboard";
+import { densityFromSearchParams } from "@/lib/density";
 import type { LiveEvent } from "@/lib/events";
 import { connectLive, liveUrl } from "@/lib/live";
 import { projectForViewer } from "@/lib/project";
@@ -70,10 +73,11 @@ const AWAITING_EVENTS: LiveEvent[] = [
 ];
 const AWAITING_STATE = foldEvents(AWAITING_EVENTS);
 
-/** Live page with role-scoped projection for owner and contact. */
+/** Live page with role-scoped projection and simple/detailed density. */
 export default function LivePlaceholder() {
   const searchParams = useSearchParams();
   const viewer = viewerFromSearchParams(searchParams);
+  const density = densityFromSearchParams(searchParams, viewer.role);
   const preview = searchParams.get("preview") === "1";
   const previewAwaiting = searchParams.get("preview") === "awaiting";
   const sse = liveUrl(viewer.viewerId);
@@ -109,7 +113,6 @@ export default function LivePlaceholder() {
     ((preview || previewAwaiting) && PREVIEW_REQUEST?.type === "request"
       ? PREVIEW_REQUEST.chips
       : undefined);
-  // Projection already stripped text for contact; never pass raw text as fallback for contact.
   const requestText =
     viewer.role === "owner"
       ? (state.request?.text ??
@@ -122,58 +125,97 @@ export default function LivePlaceholder() {
   const taskId =
     state.taskId ?? (preview || previewAwaiting ? "preview-task" : undefined);
   const showConfirmations = !!state.confirmations?.booked || !!state.confirmations?.notified;
+  const simple = density === "simple";
 
   return (
-    <main>
-      <RequestBar viewer={viewer} chips={chips} requestText={requestText} />
+    <main className={simple ? "live-main density-simple" : "live-main density-detailed"} key={density}>
+      <section className="live-section live-section-request">
+        <RequestBar viewer={viewer} chips={chips} requestText={requestText} />
+      </section>
 
-      {calls.length > 0 ? (
-        <section className="calls" aria-label="Clinic calls">
-          {calls.map((call) => (
-            <CallCard
-              key={call.call_id}
-              call={call}
-              winner={winnerId === call.call_id}
+      {simple ? (
+        <>
+          <CallStrip calls={calls} winnerId={winnerId} />
+          <BookingHero
+            decision={state.decision}
+            approval={state.approval}
+            confirmations={state.confirmations}
+          />
+          {state.decision && state.approval?.pick && !state.approval?.approved ? (
+            <DecisionCard
+              viewer={viewer}
+              decision={state.decision}
+              approval={state.approval}
+              taskId={taskId}
+              compact
             />
-          ))}
-        </section>
-      ) : null}
+          ) : null}
+          <ContactReply
+            viewer={viewer}
+            taskId={taskId}
+            awaitingReply={state.canReplyRide}
+            hasReply={!!state.contact?.reply}
+          />
+        </>
+      ) : (
+        <>
+          <section className="live-section live-section-calls">
+            {calls.length > 0 ? (
+              <div className="calls" aria-label="Clinic calls">
+                {calls.map((call) => (
+                  <CallCard
+                    key={call.call_id}
+                    call={call}
+                    winner={winnerId === call.call_id}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </section>
 
-      {state.decision ? (
-        <DecisionCard
-          viewer={viewer}
-          decision={state.decision}
-          approval={state.approval}
-          taskId={taskId}
-        />
-      ) : null}
+          <section className="live-section live-section-decision">
+            {state.decision ? (
+              <DecisionCard
+                viewer={viewer}
+                decision={state.decision}
+                approval={state.approval}
+                taskId={taskId}
+              />
+            ) : null}
+          </section>
 
-      <TransportCard
-        transport={state.transport}
-        contact={state.contact}
-        ride={state.confirmations?.ride}
-      />
+          <section className="live-section live-section-transport">
+            <TransportCard
+              transport={state.transport}
+              contact={state.contact}
+              ride={state.confirmations?.ride}
+            />
+            <ContactReply
+              viewer={viewer}
+              taskId={taskId}
+              awaitingReply={state.canReplyRide}
+              hasReply={!!state.contact?.reply}
+            />
+            {viewer.role === "owner" && state.contact?.message && !state.contact?.reply ? (
+              <div className="card status-card">
+                <p className="muted status-card-text">
+                  Waiting for {state.contact.name ?? "the contact"} to reply about the ride.
+                </p>
+              </div>
+            ) : null}
+          </section>
 
-      <ContactReply
-        viewer={viewer}
-        taskId={taskId}
-        awaitingReply={state.canReplyRide}
-        hasReply={!!state.contact?.reply}
-      />
+          <section className="live-section live-section-confirm">
+            <Confirmations confirmations={state.confirmations} show={showConfirmations} />
+          </section>
+        </>
+      )}
 
-      {viewer.role === "owner" && state.contact?.message && !state.contact?.reply ? (
-        <div className="card status-card">
-          <p className="muted status-card-text">
-            Waiting for {state.contact.name ?? "the contact"} to reply about the ride.
-          </p>
-        </div>
-      ) : null}
-
-      <Confirmations confirmations={state.confirmations} show={showConfirmations} />
-
-      <div className="card status-card">
+      <div className="card status-card live-meta">
         <p className="faint placeholder-meta status-card-text">
           Viewing as <strong>{viewer.role}</strong>
+          {" · "}
+          <strong>{density}</strong> view
           {" · "}
           {mode === "poll" ? "Poll mode" : "SSE"} → <code>{sse}</code>
           {preview || previewAwaiting ? " · preview" : ""}

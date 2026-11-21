@@ -1,21 +1,23 @@
-/* Design tokens from frontend/prototype/index.html — use these, never raw hex in components. */
+/* Soft-blue health palette — use CSS variables in components, never raw hex. */
 :root {
-  --bg: #f6f7f4;
-  --card: #fff;
-  --line: #e3e5df;
-  --ink: #1d2320;
-  --muted: #5d655f;
-  --faint: #8a918b;
-  --accent: #2f6fd6;
-  --accent-bg: #e8f0fc;
+  --bg: #f4f7fb;
+  --bg-wash: #e8f1f8;
+  --card: #ffffff;
+  --line: #d5e0eb;
+  --ink: #1a2430;
+  --muted: #5a6b7a;
+  --faint: #8a9aaa;
+  --accent: #4a7fb5;
+  --accent-bg: #e8f1f8;
   --good: #2f7d32;
   --good-bg: #e7f3e5;
   --warn: #9a6400;
   --warn-bg: #fbf0d9;
   --bad: #b3261e;
   --bad-bg: #fce8e6;
-  --chip: #eef0ea;
-  --radius: 10px;
+  --chip: #eef3f8;
+  --radius: 16px;
+  --shadow: 0 8px 28px rgba(26, 36, 48, 0.06);
 }
 
 * {
@@ -29,8 +31,13 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  font: 1rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-  background: var(--bg);
+  font-family: var(--font-sans), "Nunito", system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, var(--bg-wash), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, #dfeaf5, transparent 50%),
+    var(--bg);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
 }
@@ -57,15 +64,22 @@ select {
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 1.35rem;
-  font-weight: 600;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--ink);
   text-decoration: none;
 }
@@ -79,19 +93,34 @@ select {
 .header-nav {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
-.header-nav a {
-  color: var(--muted);
-  text-decoration: none;
-  font-weight: 500;
+.header-links {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-.header-nav a:hover,
-.header-nav a[aria-current="page"] {
+.header-pill {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 999px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.header-pill:hover {
   color: var(--ink);
+  background: var(--accent-bg);
+}
+
+.header-pill[aria-current="page"] {
+  color: var(--card);
+  background: var(--ink);
 }
 
 .role-picker {
@@ -113,11 +142,12 @@ select {
 }
 
 .card {
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) 94%, transparent);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius);
   padding: 16px 18px;
   margin-bottom: 14px;
+  box-shadow: var(--shadow);
 }
 
 .muted {
@@ -672,6 +702,189 @@ select {
   font-size: 0.9rem;
 }
 
+/* Density toggle */
+.density-toggle {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-width: 11.5rem;
+  min-height: 44px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--accent-bg);
+}
+
+.density-toggle-thumb {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: 0 2px 8px rgba(26, 36, 48, 0.12);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+
+.density-toggle[data-density="detailed"] .density-toggle-thumb {
+  transform: translateX(100%);
+}
+
+.density-toggle-btn {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  padding: 8px 10px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.density-toggle-btn.is-active {
+  color: var(--ink);
+}
+
+/* Live density layouts */
+.live-main {
+  animation: live-enter 0.35s ease;
+}
+
+@keyframes live-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.live-section {
+  animation: fade 0.35s ease;
+}
+
+.call-strip-title {
+  margin: 0 0 12px;
+  font-size: 1.15rem;
+}
+
+.call-strip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.call-strip-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 1px solid transparent;
+}
+
+.call-strip-item.is-winner {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.call-strip-clinic {
+  font-weight: 700;
+  flex: 1;
+  min-width: 8rem;
+}
+
+.call-strip-result {
+  font-size: 0.9rem;
+}
+
+.booking-hero {
+  text-align: center;
+  padding: 28px 20px;
+  background:
+    linear-gradient(160deg, var(--accent-bg), var(--card) 55%);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+
+.booking-hero-label {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.booking-hero-time {
+  margin: 10px 0 0;
+  font-size: 1.55rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.booking-hero-ride {
+  margin: 12px 0 0;
+  font-size: 1.05rem;
+}
+
+.decision-compact .decision-title {
+  font-size: 1.15rem;
+}
+
+.decision-approve {
+  min-width: 8rem;
+  font-size: 1.05rem;
+}
+
+/* Calendar page */
+.calendar-title {
+  margin: 0 0 4px;
+  font-size: 1.45rem;
+  font-weight: 800;
+}
+
+.calendar-sub {
+  margin: 0 0 16px;
+}
+
+.calendar-frame-wrap {
+  padding: 10px;
+  overflow: hidden;
+}
+
+.calendar-frame {
+  display: block;
+  width: 100%;
+  min-height: 70vh;
+  border: 0;
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.calendar-empty-title {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.calendar-empty-hint {
+  margin: 12px 0 0;
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
 @media (max-width: 800px) {
   .wrap {
     padding: 16px;
@@ -689,5 +902,13 @@ select {
   .calls,
   .confirms {
     grid-template-columns: 1fr;
+  }
+
+  .site-header {
+    padding: 12px;
+  }
+
+  .calendar-frame {
+    min-height: 60vh;
   }
 }
