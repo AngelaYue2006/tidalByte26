@@ -293,3 +293,24 @@ cannot supply trusted signature or role context. The new-style trial's classic
 IncomingPhoneNumbers lookup result is not an outstanding #27 acceptance blocker:
 Joyce's delivered/received evidence and its limitations are recorded in #7/PR #79.
 The optional live outbound sender check remains strict; the demo keeps it off.
+
+
+### One-call live acceptance command
+
+Only after the backend owner prepares a fresh synthetic task/call with no result,
+use `python -m integrations.elevenlabs_smoke --env-file ../lifeline-6/.env
+--call-id <prepared-call-id> --allowlist-index <one-based-authorized-entry>`.
+This is an explicitly live command, independent of the file's VOICE_MODE. It
+uses the backend's redacted intake and windows and replaces only the fixture
+clinic phone with the explicitly selected allowlisted teammate destination.
+It refuses unknown clinics, missing/ambiguous contexts and already completed
+calls. Never reuse a context after a partially successful or ambiguous dial.
+
+The test checks Twilio read access before dialing, captures only this dial's
+call-control receipt, and schedules a hangup after 40 seconds. It rechecks the
+actual Twilio destination before call control. The teammate should also hang up
+before one minute if call control reports a failure. Output contains only
+receipt/status/count/disclosure checks, never phone numbers or transcript text.
+No audio is fetched or stored; the adapter's recording-off preflight still runs.
+An accepted dial is not a booking or proof of a complete offer. The command
+succeeds only when transcript events and one structured call_result arrive.
