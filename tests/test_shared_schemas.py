@@ -142,14 +142,29 @@ def test_envelope_fields_are_accepted(registry):
     assert not v.is_valid({**EXAMPLE_EVENTS["approved"], "visibility": "everyone"})
 
 
+def test_contact_request_event_never_carries_text(registry):
+    v = validator("events.schema.json", registry)
+    chips_only = {"type": "request", "chips": OWNER_TASK["chips"]}
+    v.validate({**chips_only, "visibility": "contact"})
+    v.validate({**chips_only, "text": "I need a cleaning", "visibility": "owner"})
+    assert not v.is_valid({**chips_only, "text": "I need a cleaning", "visibility": "contact"})
+
+
+def test_transport_check_is_always_simulated(registry):
+    v = validator("events.schema.json", registry)
+    assert not v.is_valid({**EXAMPLE_EVENTS["transport_check"], "simulated": False})
+    assert not v.is_valid({k: val for k, val in EXAMPLE_EVENTS["transport_check"].items() if k != "simulated"})
+
+
 def test_intake_request_example_validates(registry):
     validator("intake_request.schema.json", registry).validate(INTAKE)
 
 
 def test_intake_dropped_fields_are_names_never_values(registry):
     v = validator("intake_request.schema.json", registry)
-    for leaked in ("$150", "DD-4471-22", "1948-03-02", "knee pain"):
+    for leaked in ("$150", "DD-4471-22", "1948-03-02", "knee pain", "arthritis", "metformin"):
         assert not v.is_valid({**INTAKE, "dropped_fields": [leaked]}), leaked
+    assert not v.is_valid({**INTAKE, "dropped_fields": ["symptoms", "symptoms"]})
 
 
 def test_intake_rejects_extra_fields(registry):
@@ -165,7 +180,7 @@ def test_decision_example_validates_and_needs_two_reasons(registry):
     assert not v.is_valid({k: val for k, val in DECISION.items() if k != "tradeoff"})
 
 
-def test_task_owner_and_contact_variants(registry):
+def test_owner_and_contact_projections(registry):
     v = validator("task.schema.json", registry)
     v.validate(OWNER_TASK)
     v.validate(CONTACT_TASK)

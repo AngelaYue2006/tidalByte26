@@ -36,10 +36,10 @@
     },
     "dropped_fields": {
       "type": "array",
-      "description": "Names of the fields Nano removed, for the redaction metric. Field names only, never values. Known names: symptoms, medications, member_id, date_of_birth, address, contact_phone, patient_name, mobility_details.",
+      "description": "Names of the fields Nano removed, for the redaction metric. Field names from this fixed list only, never values.",
       "items": {
         "type": "string",
-        "pattern": "^[a-z][a-z0-9_]{0,39}$"
+        "enum": ["symptoms", "diagnosis", "medications", "allergies", "mobility_details", "member_id", "date_of_birth", "patient_name", "address", "email", "contact_name", "contact_phone"]
       },
       "uniqueItems": true
     }

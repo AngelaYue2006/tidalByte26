@@ -39,7 +39,7 @@
         {
           "properties": {
             "type": { "const": "request" },
-            "text": { "type": "string", "description": "Raw utterance. Owner visibility only; absent in the contact view." },
+            "text": { "type": "string", "description": "Raw utterance. Owner visibility only; an event with visibility contact must not carry it." },
             "chips": {
               "type": "array",
               "description": "Redacted facts. A chip starting with ! renders green (e.g. !Processed on device).",
@@ -47,6 +47,10 @@
             }
           },
           "required": ["type", "chips"]
+        },
+        {
+          "if": { "properties": { "visibility": { "const": "contact" } }, "required": ["visibility"] },
+          "then": { "not": { "required": ["text"] } }
         }
       ]
     },
@@ -193,7 +197,7 @@
             "type": { "const": "transport_check" },
             "status": { "type": "string", "enum": ["checking", "unavailable", "available"] },
             "reason": { "type": "string", "description": "Error code such as UNAVAILABLE_ACCESSIBLE_RIDE; empty while checking." },
-            "simulated": { "type": "boolean" }
+            "simulated": { "const": true, "description": "Always true: the transport check is simulated (docs/DECISIONS.md D12)." }
           },
           "required": ["type", "status", "reason", "simulated"]
         }
