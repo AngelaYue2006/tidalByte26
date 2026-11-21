@@ -9,7 +9,13 @@ from app.db import session_scope
 from app.events import Viewer, list_events
 from app.main import create_app
 from app.models import Call, Contact, Event, Task, Turn
-from app.nemotron.call_agent import LightningClient, build_messages, delta_text, relay
+from app.nemotron.call_agent import (
+    LightningClient,
+    build_messages,
+    delta_text,
+    relay,
+    strip_reasoning,
+)
 from app.nemotron.prompts import OPENING_LINE, call_agent, window_label
 from app.nemotron.types import CallSpec
 from fastapi.testclient import TestClient
@@ -181,8 +187,8 @@ def test_stream_relays_openai_chunks_and_ends_with_done(client, app):
 def test_turns_are_written_for_clinic_and_agent(client, app):
     client.post("/v1/chat/completions", json=body())
     assert turns(app) == [
-        (1, "clinic", "Yes, we do. A cleaning is $95 with Delta."),
-        (2, "agent", "Yes. Do you take Delta Dental?"),
+        (2, "clinic", "Yes, we do. A cleaning is $95 with Delta."),
+        (3, "agent", "Yes. Do you take Delta Dental?"),
     ]
 
 
@@ -210,23 +216,50 @@ def test_each_turn_is_one_transcript_event_both_roles_can_see(client, app):
                 validator.validate({k: v for k, v in e.items() if k != "id"})
 
 
-def test_resent_conversation_does_not_duplicate_the_clinic_turn(client, app):
+def test_retry_with_different_model_wording_keeps_one_turn_and_one_event(client, app):
     client.post("/v1/chat/completions", json=body())
-    client.post("/v1/chat/completions", json=body())  # ElevenLabs retry with the same history and the same reply
-    assert [t[1] for t in turns(app)] == ["clinic", "agent"]
-    app.state.lightning_client.pieces = ["Thursday ", "works."]
-    client.post("/v1/chat/completions", json=body(messages=body()["messages"] + [
-        {"role": "assistant", "content": "Yes. Do you take Delta Dental?"},
-        {"role": "user", "content": "Thursday at 9:30 is open."},
-    ]))
+    app.state.lightning_client.pieces = ["Sure, ", "do you take Delta?"]  # Lightning words the retry differently
+    client.post("/v1/chat/completions", json=body())  # ElevenLabs retry with the same history
+    assert turns(app) == [
+        (2, "clinic", "Yes, we do. A cleaning is $95 with Delta."),
+        (3, "agent", "Yes. Do you take Delta Dental?"),
+    ]
+    with session_scope(app.state.engine) as s:
+        assert len(s.exec(select(Event).where(Event.type == "transcript")).all()) == 2
+
+
+def test_a_genuine_repeated_line_later_in_the_call_is_kept(client, app):
+    history = body()["messages"]
+    client.post("/v1/chat/completions", json=body(messages=history))
+    app.state.lightning_client.pieces = ["Okay."]
+    history = history + [{"role": "assistant", "content": "Yes. Do you take Delta Dental?"}, {"role": "user", "content": "Okay."}]
+    client.post("/v1/chat/completions", json=body(messages=history))
+    history = history + [{"role": "assistant", "content": "Okay."}, {"role": "user", "content": "Okay."}]
+    client.post("/v1/chat/completions", json=body(messages=history))
     assert [t[1:] for t in turns(app)] == [
         ("clinic", "Yes, we do. A cleaning is $95 with Delta."),
         ("agent", "Yes. Do you take Delta Dental?"),
-        ("clinic", "Thursday at 9:30 is open."),
-        ("agent", "Thursday works."),
+        ("clinic", "Okay."),
+        ("agent", "Okay."),
+        ("clinic", "Okay."),
+        ("agent", "Okay."),
     ]
     with session_scope(app.state.engine) as s:
-        assert s.exec(select(Event).where(Event.type == "transcript")).all().__len__() == 4  # one event per turn, none for the resend
+        payloads = [json.loads(e.payload_json) for e in s.exec(select(Event).where(Event.type == "transcript").order_by(Event.id)).all()]
+    assert [p["seq"] for p in payloads] == [2, 3, 4, 5, 6, 7]
+
+
+def test_retry_repairs_a_turn_whose_event_was_never_written(client, app):
+    client.post("/v1/chat/completions", json=body())
+    with session_scope(app.state.engine) as s:
+        for e in s.exec(select(Event).where(Event.type == "transcript")).all():
+            s.delete(e)  # simulate the turn committing and the emit failing
+    client.post("/v1/chat/completions", json=body())
+    assert len(turns(app)) == 2
+    with session_scope(app.state.engine) as s:
+        rows = s.exec(select(Event).where(Event.type == "transcript").order_by(Event.id)).all()
+        seen = [(json.loads(r.payload_json)["seq"], json.loads(r.payload_json)["speaker"]) for r in rows]
+    assert seen == [(2, "clinic"), (3, "agent")]
 
 
 def test_first_turn_without_a_clinic_line_writes_only_the_agent(client, app):
@@ -291,12 +324,43 @@ def test_build_messages_drops_vendor_system_prompt_and_keeps_order():
     assert "any time this week" in out[0]["content"]
 
 
+def test_reasoning_deltas_are_stripped_before_relay():
+    mixed = {
+        "id": "x", "object": "chat.completion.chunk", "created": 1, "model": "m",
+        "choices": [{"index": 0, "delta": {"reasoning": "the patient wants a cleaning", "reasoning_content": "...", "content": "Yes."}, "finish_reason": None}],
+    }
+    only_reasoning = {**mixed, "choices": [{"index": 0, "delta": {"reasoning_content": "thinking"}, "finish_reason": None}]}
+    out = b"".join(relay(iter([only_reasoning, mixed, chunk("", "stop")])))
+    sent = [json.loads(line[6:]) for line in out.decode().split("\n\n") if line.startswith("data: {")]
+    assert all("reasoning" not in c["choices"][0]["delta"] and "reasoning_content" not in c["choices"][0]["delta"] for c in sent)
+    assert "".join(delta_text(c) for c in sent) == "Yes."
+    assert strip_reasoning(mixed)["choices"][0]["delta"] == {"content": "Yes."}
+    assert strip_reasoning(chunk("hi")) == chunk("hi")
+    assert b"thinking" not in out and b"patient wants" not in out
+
+
 def test_relay_reports_first_token_and_full_sentence():
     seen = {}
     out = b"".join(relay(iter([chunk("Hel"), chunk("lo"), chunk("", "stop")]), on_first_token=lambda s: seen.setdefault("first", s), on_complete=lambda t: seen.setdefault("text", t)))
     assert out.endswith(b"data: [DONE]\n\n")
     assert seen["text"] == "Hello"
     assert seen["first"] >= 0
+
+
+def test_lightning_client_streams_with_thinking_off(monkeypatch):
+    from app.nemotron.call_agent import NO_THINK_EXTRA_BODY
+
+    client = LightningClient(api_key="k", model_id="nvidia/x")
+    seen = {}
+
+    def fake_create(**kwargs):
+        seen.update(kwargs)
+        return iter([])
+
+    monkeypatch.setattr(client._client.chat.completions, "create", fake_create)
+    assert list(client.stream_chat([{"role": "user", "content": "hi"}])) == []
+    assert seen["stream"] is True and seen["model"] == "nvidia/x"
+    assert seen["extra_body"] == NO_THINK_EXTRA_BODY == {"chat_template_kwargs": {"enable_thinking": False}}
 
 
 def test_lightning_client_never_guesses_a_model_id():

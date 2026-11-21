@@ -4,8 +4,10 @@ Correction verified in #6 (docs/ELEVENLABS.md): `call_id` and the secret arrive 
 in the request body (what the voice adapter passed as `custom_llm_extra_body` when it started the call),
 not in dynamic variables. The `Authorization: Bearer` header is accepted for the same secret as a fallback.
 
-Every recorded turn is one `transcript` event with `contact` visibility (both roles see the agent speak only
-redacted facts). First-token latency is one `call_agent` row in metrics.jsonl per proxy turn.
+Turns are keyed by their position in the conversation ElevenLabs sends, so a retried request maps onto the same
+rows and a genuine repeated line later in the call is kept. Every turn has one `transcript` event with `contact`
+visibility (docs/ARCHITECTURE.md: transcripts are visible to both roles); a retry repairs a missing event.
+First-token latency is one `call_agent` row in metrics.jsonl per proxy turn.
 """
 
 from __future__ import annotations
@@ -20,13 +22,13 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import Engine
-from sqlmodel import func, select
+from sqlmodel import select
 
 from app import metrics
 from app.config import MissingSetting, Settings
 from app.db import session_scope
 from app.events import EventBus, emit
-from app.models import Call, Task, Turn
+from app.models import Call, Event, Task, Turn
 from app.nemotron.call_agent import (
     ChatStream,
     LightningClient,
@@ -92,35 +94,37 @@ def load_spec(engine: Engine, call_id: str) -> CallSpec:
         )
 
 
-def last_clinic_line(messages: list[dict]) -> str | None:
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            text = (m.get("content") or "").strip()
-            return text or None
-        if m.get("role") == "assistant":
-            return None
-    return None
+def conversation_turns(messages: list[dict]) -> tuple[list[dict], int | None, int]:
+    """The non-system messages in order, the clinic's line position (when the last message is the clinic's), and the
+    position the agent's reply will take. Positions are 1-based indexes into the conversation ElevenLabs sends, so
+    a retried request maps to the same turns and a genuine repeat later in the call gets a new position."""
+    turns = [m for m in messages if m.get("role") in ("user", "assistant")]
+    n = len(turns)
+    clinic_seq = n if n and turns[-1].get("role") == "user" and (turns[-1].get("content") or "").strip() else None
+    return turns, clinic_seq, n + 1
 
 
-def record_turn(engine: Engine, bus: EventBus, spec: CallSpec, speaker: str, text: str) -> Turn | None:
-    """Append one turn and emit its transcript event, unless this speaker's last stored line is the same
-    (ElevenLabs resends the whole conversation each turn and retries on slow replies)."""
+def record_turn(engine: Engine, bus: EventBus, spec: CallSpec, seq: int, speaker: str, text: str) -> Turn | None:
+    """Make sure turn `seq` of this call and its transcript event both exist. A retry that finds the turn keeps the
+    stored line (even if Lightning now words it differently) and only repairs a missing event (invariant 7)."""
     if not text:
         return None
     call_id = spec.call_id
     with session_scope(engine) as session:
-        last = session.exec(
-            select(Turn).where(Turn.call_id == call_id, Turn.speaker == speaker).order_by(Turn.seq.desc())
-        ).first()
-        if last is not None and last.text == text:
-            return None
-        count = session.exec(select(func.count()).select_from(Turn).where(Turn.call_id == call_id)).one()
-        turn = Turn(call_id=call_id, seq=int(count) + 1, speaker=speaker, text=text)
-        session.add(turn)
-        session.flush()
+        turn = session.exec(select(Turn).where(Turn.call_id == call_id, Turn.seq == seq)).first()
+        if turn is None:
+            turn = Turn(call_id=call_id, seq=seq, speaker=speaker, text=text)
+            session.add(turn)
+            session.flush()
         session.refresh(turn)
         session.expunge(turn)
-    emit(engine, bus, spec.task_id, "transcript", {"call_id": call_id, "speaker": speaker, "text": text}, visibility="contact")
+        has_event = any(
+            json.loads(e.payload_json).get("call_id") == call_id and json.loads(e.payload_json).get("seq") == seq
+            for e in session.exec(select(Event).where(Event.task_id == spec.task_id, Event.type == "transcript")).all()
+        )
+    if not has_event:
+        emit(engine, bus, spec.task_id, "transcript",
+             {"call_id": call_id, "seq": seq, "speaker": turn.speaker, "text": turn.text}, visibility="contact")
     return turn
 
 
@@ -164,7 +168,9 @@ async def chat_completions(request: Request):
     spec = load_spec(engine, call_id)
     incoming = body.get("messages") if isinstance(body.get("messages"), list) else []
     bus: EventBus = request.app.state.bus
-    record_turn(engine, bus, spec, "clinic", last_clinic_line(incoming) or "")
+    turns, clinic_seq, agent_seq = conversation_turns(incoming)
+    if clinic_seq is not None:
+        record_turn(engine, bus, spec, clinic_seq, "clinic", (turns[-1].get("content") or "").strip())
     messages = build_messages(spec, incoming)  # elevenlabs_extra_body and the vendor system prompt never go upstream
     client = lightning_client(request)
 
@@ -172,7 +178,7 @@ async def chat_completions(request: Request):
         record_first_token(request, call_id, seconds)
 
     def on_complete(text: str) -> None:
-        record_turn(engine, bus, spec, "agent", text)
+        record_turn(engine, bus, spec, agent_seq, "agent", text)
 
     if body.get("stream", True):
         chunks: Iterator[dict] = client.stream_chat(messages)

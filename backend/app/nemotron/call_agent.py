@@ -18,6 +18,9 @@ from app.nemotron.types import CallSpec
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 MAX_REPLY_TOKENS = 120  # a phone turn is one or two sentences
 TEMPERATURE = 0.3
+# Measured 2026-11-21 (#52): with thinking on, Lightning spends its whole token budget on reasoning_content and says
+# nothing; with it off the first spoken token arrives in about 0.3 s. Phone turns never need the scratchpad.
+NO_THINK_EXTRA_BODY = {"chat_template_kwargs": {"enable_thinking": False}}
 
 
 class ChatStream(Protocol):
@@ -46,6 +49,7 @@ class LightningClient:
             stream=True,
             temperature=TEMPERATURE,
             max_tokens=MAX_REPLY_TOKENS,
+            extra_body=NO_THINK_EXTRA_BODY,
         )
         for chunk in stream:
             yield chunk.model_dump(exclude_none=True)
@@ -58,11 +62,28 @@ def build_messages(spec: CallSpec, incoming: list[dict]) -> list[dict]:
     ]
 
 
+REASONING_KEYS = ("reasoning", "reasoning_content")  # docs/ELEVENLABS.md: the proxy drops these deltas
+
+
 def delta_text(chunk: dict) -> str:
     try:
         return chunk["choices"][0]["delta"].get("content") or ""
     except (KeyError, IndexError, TypeError, AttributeError):
         return ""
+
+
+def strip_reasoning(chunk: dict) -> dict:
+    """The same chunk without reasoning deltas. ElevenLabs would read them aloud; only spoken content goes through."""
+    choices = chunk.get("choices")
+    if not isinstance(choices, list):
+        return chunk
+    cleaned = []
+    for choice in choices:
+        delta = choice.get("delta") if isinstance(choice, dict) else None
+        if isinstance(delta, dict) and any(k in delta for k in REASONING_KEYS):
+            choice = {**choice, "delta": {k: v for k, v in delta.items() if k not in REASONING_KEYS}}
+        cleaned.append(choice)
+    return {**chunk, "choices": cleaned}
 
 
 def relay(
@@ -76,6 +97,7 @@ def relay(
     first_seen = False
     text: list[str] = []
     for chunk in chunks:
+        chunk = strip_reasoning(chunk)
         piece = delta_text(chunk)
         if piece and not first_seen:
             first_seen = True
