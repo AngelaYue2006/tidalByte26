@@ -10,3 +10,4 @@ pytest
 google-auth
 requests
 tzdata
+python-dotenv

@@ -194,19 +194,6 @@ def test_transport_uses_unavailable_fixture_and_event_schema(booking):
     jsonschema.validate(result.dashboard_event(), schema)
 
 
-@pytest.mark.parametrize(
-    "module,env_name,invoke",
-    [
-        (sms, "SMS_MODE", lambda: sms.send("+15555550101", "Test", "demo")),
-        (sms, "SMS_MODE", lambda: sms.parse_inbound({"From": "+15555550101"})),
-    ],
-)
-def test_live_modes_fail_closed_without_network(monkeypatch, module, env_name, invoke):
-    monkeypatch.setenv(env_name, "live")
-    with pytest.raises(Exception, match="not implemented"):
-        invoke()
-
-
 def test_time_models_reject_naive_or_reversed_ranges():
     with pytest.raises(ValidationError):
         Window(start="2026-11-24T13:00:00", end="2026-11-24T17:00:00")

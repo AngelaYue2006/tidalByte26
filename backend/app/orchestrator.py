@@ -366,11 +366,18 @@ class Pipeline:
             contact = next((c for c in contacts if c.scope == "ride_requests"), None)
             if contact is None:
                 raise PipelineFailure("CONTACT_DECLINED", "No emergency contact is on file to ask for a ride.")
-            name, phone = contact.name, contact.phone_e164
+            name, phone, relationship = contact.name, contact.phone_e164, contact.relationship
         spec = run.specs[run.winner.call_id]
-        message = texts.contact_request_message(run.owner.name.split()[0], run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
-        self._sms(run, phone, message, "contact_request")
-        self._emit(run, "contact_request", {"contact": name.split()[0], "message": message}, "contact")
+        first = run.owner.name.split()[0]
+        facts = local_intake.ContactFacts(first, name.split()[0], run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
+        template = texts.contact_request_message(first, run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
+        # Nano writes the scoped message on the device from the full record; the check falls back to the template (rule 4).
+        written = await asyncio.to_thread(
+            local_intake.contact_message, run.owner, run.intake, facts,
+            relationship=relationship, request_text=run.text, template=template, model=self.deps.intake_model(),
+        )
+        self._sms(run, phone, written.text, "contact_request")
+        self._emit(run, "contact_request", {"contact": name.split()[0], "message": written.text}, "contact")
         await self._wait(run.task_id)
         return self._status(run) == "awaiting_contact"
 
@@ -438,21 +445,27 @@ class Pipeline:
         emit(self.engine, self.bus, run.task_id, type_, payload, visibility)
 
     def _sms(self, run: Run, to: str, text: str, step: str):
+        return self.send_sms(run.task_id, to, text, step)
+
+    def send_sms(self, task_id: str, to: str, text: str, step: str):
         """Send one text, keyed by task and step: the receipts table makes a repeat of the step return the first receipt (#24).
 
         Returns the MessageReceipt, or None when the adapter refused: that is reported to the owner as a
         `task_updated` with reason `SMS_NOT_SENT`, and the text is never shown as sent (status from receipts).
+        Public so the contact-reply handler (app/contact_replies.py) texts the owner through the same path.
         """
         try:
             stored, _ = receipts.once(  # one text per (task, step); a repeat of the step returns the first receipt
-                self.engine, run.task_id, f"sms:{step}", "sms",
-                lambda: self.deps.sms_send(to, text, f"{run.task_id}:{step}"),
+                self.engine, task_id, f"sms:{step}", "sms",
+                lambda: self.deps.sms_send(to, text, f"{task_id}:{step}"),
                 external_id=lambda r: r.message_id,
             )
             return MessageReceipt.model_validate(stored)
         except (RuntimeError, OSError, ValueError) as exc:  # the adapters raise plain, readable errors
-            log.warning("sms %s for task %s not sent: %s", step, run.task_id, exc)
-            self._emit(run, "task_updated", {"status": self._status(run), "reason": "SMS_NOT_SENT", "message": f"{step}: {exc}"}, "owner")
+            log.warning("sms %s for task %s not sent: %s", step, task_id, exc)
+            with Session(self.engine) as session:
+                status = session.get(Task, task_id).status
+            emit(self.engine, self.bus, task_id, "task_updated", {"status": status, "reason": "SMS_NOT_SENT", "message": f"{step}: {exc}"}, "owner")
             return None
 
     def _now(self, run: Run) -> datetime:

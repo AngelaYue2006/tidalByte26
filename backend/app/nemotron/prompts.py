@@ -112,3 +112,30 @@ def call_summary_user(transcript: list[dict], *, call_date_iso: str, timezone: s
     """Facts-only user message: the transcript lines (agent and clinic speech only) plus the date context."""
     lines = [f"{t.get('speaker', '?')}: {t.get('text', '')}" for t in transcript]
     return json.dumps({"call_date": call_date_iso, "timezone": timezone, "transcript": lines}, ensure_ascii=False)
+
+
+# ---- contact message (step 9, product rule 4) ---------------------------------------------------------------------
+
+# What Nano must return for the contact message. Ollama enforces this as `format`; local_intake checks the text.
+CONTACT_MESSAGE_SCHEMA: dict = {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}
+
+_CONTACT_SYSTEM = """You are the on-device message writer for LifeLine, an assistant that books medical appointments for older adults.
+You receive the owner's full record, the booked appointment and the emergency contact. Write ONE short text message
+(under 300 characters) to the contact asking whether they can drive the owner to the appointment.
+
+The message may contain ONLY these facts, and nothing else from the record:
+- the owner's first name and the contact's first name
+- what the appointment is for, in plain words (e.g. "dental cleaning")
+- the clinic name, the day and time exactly as given in "when", and the clinic address exactly as given
+- that no accessible ride was found, and a request to reply YES or NO
+
+Never include: the owner's last name, date of birth, phone number or home address; the insurance carrier or member ID;
+any price or budget; symptoms, medications or mobility details; the original spoken request; anything marked private.
+Plain words, no emoji, no greeting longer than the contact's first name.
+Return ONLY a JSON object: {"message": "..."}."""
+
+
+def contact_system_prompt() -> str:
+    """System prompt for Nano's contact message. The record itself goes in the user message, on the device only."""
+    return _CONTACT_SYSTEM
+

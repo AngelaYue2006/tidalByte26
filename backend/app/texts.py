@@ -74,3 +74,12 @@ def ride_confirmed_sms_contact(owner_first_name: str, clinic: str, start: dateti
 
 def no_ride_needed_sms_contact(owner_first_name: str, clinic: str, start: datetime, address: str) -> str:
     return f"LifeLine: Appointment booked for {owner_first_name} — {clinic}, {day_and_time(start)}, {address}."
+
+
+def contact_declined_sms_user(contact_first_name: str, clinic: str, start: datetime) -> str:
+    return f"LifeLine: {contact_first_name} can't drive you to {clinic} on {day_and_time(start)}. We're still looking for a ride and will text you."
+
+
+def contact_declined_sms_contact(owner_first_name: str) -> str:
+    return f"LifeLine: Thanks for letting us know. We'll keep looking for a ride for {owner_first_name}."
+
