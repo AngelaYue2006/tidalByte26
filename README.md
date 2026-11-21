@@ -59,7 +59,7 @@ Fill in exact commands as each module lands. Secrets live in `.env`, never in th
 ## Kickoff checklist
 
 - [ ] Verify NVIDIA model IDs, streaming support, and the API key.
-- [ ] Verify ElevenLabs custom-LLM setup, outbound call API and concurrent-call limit.
+- [x] Verify ElevenLabs custom-LLM setup and outbound call API (`docs/ELEVENLABS.md`); concurrent-call limit still to read off the team account.
 - [ ] Verify all three teammate phones on the Twilio trial; SMS webhook reaches the tunnel.
 - [ ] Google Cloud project: Calendar, Places, Distance Matrix enabled; OAuth test user added.
 - [ ] Ollama running a 4-bit Nemotron Nano on the demo laptop.

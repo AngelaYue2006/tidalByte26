@@ -143,7 +143,7 @@ transport.check(booking: Booking, needs: dict) -> TransportOptions     # fixture
 
 ## ElevenLabs custom-LLM proxy
 
-ElevenLabs calls `POST /v1/chat/completions` on the tunnel URL with the conversation so far. The proxy: checks the shared secret header, reads `call_id` from the ElevenLabs dynamic variables, builds the system prompt from `prompts.call_agent(call_spec)`, forwards to the NVIDIA API with `NEMOTRON_LIGHTNING_ID` and `stream: true`, relays the stream back, and writes each completed agent and clinic turn to `turns` while emitting `transcript` events. The post-call webhook supplies the final transcript and the data-collection fields (`price`, `slot`, `insured`); if any is missing, Super extracts it from the transcript.
+ElevenLabs calls `POST /v1/chat/completions` on the tunnel URL with the conversation so far. The proxy: checks `elevenlabs_extra_body.proxy_secret` against `LLM_PROXY_SECRET`, reads `call_id` from the same `elevenlabs_extra_body` (set per call as `custom_llm_extra_body` at call start; dynamic variables do not reach the proxy, they come back in the post-call webhook), builds the system prompt from `prompts.call_agent(call_spec)`, forwards to the NVIDIA API with `NEMOTRON_LIGHTNING_ID` and `stream: true`, relays the stream back, and writes each completed agent and clinic turn to `turns` while emitting `transcript` events. The post-call webhook supplies the final transcript and the data-collection fields (`price`, `slot`, `insured`); if any is missing, Super extracts it from the transcript. The webhook is verified with `ELEVENLABS_WEBHOOK_SECRET` (`ElevenLabs-Signature` header) before anything is read. Verified field names: [`docs/ELEVENLABS.md`](ELEVENLABS.md).
 
 ## Invariants
 
@@ -173,6 +173,7 @@ NEMOTRON_NANO_TAG=          # 4-bit tag pulled into Ollama
 ELEVENLABS_API_KEY=
 ELEVENLABS_AGENT_ID=
 ELEVENLABS_PHONE_NUMBER_ID= # imported Twilio number
+ELEVENLABS_WEBHOOK_SECRET=  # verifies ElevenLabs-Signature on the post-call webhook
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_PHONE_NUMBER=
