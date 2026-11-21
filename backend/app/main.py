@@ -9,7 +9,8 @@ from fastapi import FastAPI
 
 from app.config import Settings, load_settings
 from app.db import init_db, make_engine
-from app.routers import demo
+from app.events import EventBus
+from app.routers import demo, live, tasks
 
 VERSION = "0.1.0"
 
@@ -29,7 +30,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="LifeLine", version=VERSION, lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = engine
+    app.state.bus = EventBus()
+    app.state.heartbeat_seconds = live.HEARTBEAT_SECONDS
     app.include_router(demo.router)
+    app.include_router(live.router)
+    app.include_router(tasks.router)
     return app
 
 
