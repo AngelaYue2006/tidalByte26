@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--env-file", type=Path, required=True)
     args = parser.parse_args()
     # OAuth callback URLs contain authorization codes; suppress library HTTP logs.
+    previous_logging_disable = logging.root.manager.disable
     logging.disable(logging.CRITICAL)
     try:
         path = args.env_file.resolve(strict=True)
@@ -116,6 +117,8 @@ def main():
     except Exception as error:  # noqa: BLE001 - sanitize all credential failures
         # Exception text can expose callback URLs, tokens or calendar identifiers.
         print("OAuth setup stopped:", type(error).__name__)
+    finally:
+        logging.disable(previous_logging_disable)
     return 1
 
 

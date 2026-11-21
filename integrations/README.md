@@ -2,8 +2,9 @@
 
 Calendar, Places, distance, SMS and transport expose the existing signatures from
 `docs/ARCHITECTURE.md`. All results are Pydantic facts from `integrations.types`.
-Calendar supports live mode as described below; other live service modes still fail closed. Voice implementations are
-separate work (#13 and #26); this PR defines their types only.
+Calendar, Places and distance support live mode as described below. SMS live
+mode still fails closed on this branch. Voice implementations are separate
+work (#13 and #26).
 
 The defaults are `CALENDAR_MODE=mock`, `PLACES_MODE=fixture`, `SMS_MODE=mock`,
 and `TRANSPORT_MODE=fixture`. The backend loads its environment; these adapters
@@ -108,3 +109,49 @@ The live hand test uses only `free_windows`; no real calendar event was inserted
 Event creation, duplicate recovery, mismatched receipts and network errors are
 covered against an in-memory vendor and `httpx.MockTransport`. This proves the
 adapter behavior without claiming a real booking or bypassing task approval.
+
+## Live discovery and driving distances (#29)
+
+Set `PLACES_MODE=live` and `GOOGLE_MAPS_API_KEY` in the backend environment.
+Enable Places API (New) and Routes API for that key. Text Search sends only
+`<care_type> near <area>` with a `places.id` field mask; Place Details requests
+only name, address, coordinates and international phone. The live limit is 0-3;
+missing required detail fields fail safely rather than return incomplete facts.
+No vendor response bodies or phone values are logged by these adapters.
+
+Configure `DEMO_PHONE_ALLOWLIST` in order with the teammate phones for the clinic
+roles. Live search requires at least one distinct E.164 allowlisted phone per
+requested result **before** making any Google request. The first three numbers
+map to the first three search results. Source clinic phones are validated and
+discarded; they never escape this boundary. Returned clinics have `simulated=True`
+because the phone substitution makes the demo synthetic, even though the name,
+address and coordinates come from Google. A count-only INFO log explicitly
+records the substitution. The call adapter must still recheck the allowlist on
+every dial and disclose that it is AI in its first line. Discovery never dials.
+
+`drive(origin, clinics)` accepts an address, a `{lat, lng}` dict, or a two-item
+latitude/longitude sequence. It preserves clinic order and calls Routes
+`computeRoutes` with `DRIVE`, `TRAFFIC_UNAWARE` and only distance/duration fields.
+It returns miles and minutes with `simulated=False`; these are Google average
+traffic-independent route estimates, not current traffic measurements. Routes
+replaces legacy Distance Matrix by the owner's earlier decision (PR #64).
+
+The owner approved the existing fixture fallback for #29: when Google cannot
+provide a route, a matching synthetic home and fixture place ID may return the
+fixture distance/time with `simulated=True` and a count-free warning. Real clinic
+IDs or unrelated origins fail with a safe error. No driving time is invented from
+straight-line distance, and live clinics are never silently swapped for fixture
+clinics. Missing API credentials fail before network requests. The orchestrator
+must preserve the simulated label when publishing discovery/distance events.
+
+Validation: `python -m pytest -q integrations/tests/test_maps_live.py
+integrations/tests/test_adapters_mock.py` covers typed results, units and order,
+phone substitution and preflight, malformed details, sanitized vendor failures,
+and restricted fixture fallback using fake HTTP. One live hand test found three
+clinics, substituted three demo phones and obtained three driving routes; it sent
+no calls or SMS. Exact command and outcome are in PR #74. Adapter signatures and
+shared types are unchanged; no database writes or backend changes are required.
+
+Vendor references: [Text Search](https://developers.google.com/maps/documentation/places/web-service/text-search),
+[Place Details](https://developers.google.com/maps/documentation/places/web-service/place-details),
+[computeRoutes](https://developers.google.com/maps/documentation/routes/reference/rest/v2/TopLevel/computeRoutes).
