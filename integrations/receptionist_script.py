@@ -61,7 +61,9 @@ def build_plan(call: CallSpec) -> ReplayPlan:
                 {**base, "type": "call_status", "status": status["status"]},
             )
         )
-    for line in script["lines"]:
+    for seq, line in enumerate(
+        sorted(script["lines"], key=lambda item: item["at_ms"]), start=1
+    ):
         if line["speaker"] not in {"agent", "clinic"}:
             raise RuntimeError("Unknown synthetic transcript speaker")
         events.append(
@@ -70,6 +72,7 @@ def build_plan(call: CallSpec) -> ReplayPlan:
                 {
                     **base,
                     "type": "transcript",
+                    "seq": seq,
                     "speaker": line["speaker"],
                     "text": line["text"],
                 },

@@ -180,15 +180,29 @@ viewer visibility, and publish each event once. `events.emit` expects type
 separate from the payload, so the shim removes `type` before passing that payload.
 Do not have both the recorder and shim emit the same transcript twice.
 
-**Shared live-proxy callback acceptance is pending.** The event bus (#55) and
-orchestrator bridge (#75) are now on main. The merged bridge uses this simulator
-when present, and the combined pipeline tests pass with it. The live proxy's
-common recorder remains in open PR #58 (`record_turn(engine, call_id, speaker,
-text)`). The simulator does not invent an HTTP endpoint or import/write backend
-state. A backend owner must route both mock and live transcripts through that
-same recorder and verify it after #58 lands. Keep #13 draft/blocked until this
-remaining acceptance is verified; the merged mock bridge alone does not prove
-that live and mock share their recorder.
+**Shared callback acceptance is still pending after #58 merged.** The actual
+proxy callback is `record_turn(engine, bus, spec, seq, speaker, text)`, where
+`spec` is the backend's proxy CallSpec (available through `load_spec`), not the
+integration CallSpec. The simulator now supplies stable 1-based `seq` values for
+transcript lines, ordered by fixture timing and scoped to each call. A replay
+keeps these positions, so `(call_id, seq)` can identify the same turn on retry.
+
+The orchestrator bridge (#75) reaches this simulator, but its `_voice_event`
+still emits transcript events directly without calling `record_turn`. A real
+backend-sink test gets 13 simulated transcript events and zero stored Turn rows.
+The existing recorder also omits `simulated` from its event payload. Joyce must
+route mock transcript events through that common recorder, preserve
+`simulated=True` for mock turns (live remains false), and avoid emitting a second
+transcript. Status/result events still use the normal backend sink. This requires
+backend changes; the adapter never imports backend persistence or writes a DB.
+
+`integrations/tests/test_voice_backend_callback.py` verifies the real default
+bridge and backend sink against an in-memory synthetic database. The common
+recorder assertion is a strict expected failure until that backend change lands;
+run it with `--runxfail` to see the unmet acceptance explicitly. Once fixed, remove
+the expected-failure marker and verify rows/events match once per `(call_id, seq)`.
+Keep #13 draft/blocked until this passes; mock event delivery by itself does not
+meet the shared-recorder criterion.
 
 `start_call` returns immediately and schedules timed playback; the context exits
 only after playback finishes, or cancels pending tasks on failure/cancellation.

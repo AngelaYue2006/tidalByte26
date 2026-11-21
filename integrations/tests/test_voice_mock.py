@@ -81,6 +81,8 @@ async def test_replays_schema_valid_facts_to_callback(calls):
         own = [event for event in events if event["call_id"] == call.call_id]
         assert own[0]["status"] == "dialing"
         assert own[-1]["type"] == "call_result"
+        lines = [event for event in own if event["type"] == "transcript"]
+        assert [event["seq"] for event in lines] == list(range(1, len(lines) + 1))
         first_agent = next(e for e in own if e.get("speaker") == "agent")
         assert first_agent["text"].startswith(
             "Hi, I'm an AI assistant calling for a patient."
