@@ -9,11 +9,19 @@ from integrations.types import Booking, CalendarReceipt
 
 
 def event_body(owner_id, booking: Booking, idempotency_key, timezone) -> dict:
-    clinics = read_fixture("clinics.json")["clinics"]
-    matches = [c for c in clinics if c["name"].casefold() == booking.clinic.casefold()]
-    if len(matches) != 1:
-        raise RuntimeError("Calendar booking address is unavailable for this clinic")
-    address = matches[0]["address"]
+    address = booking.address
+    if address is None:
+        clinics = read_fixture("clinics.json")["clinics"]
+        matches = [
+            c for c in clinics if c["name"].casefold() == booking.clinic.casefold()
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                "Calendar booking address is unavailable for this clinic"
+            )
+        address = matches[0]["address"]
+    if not address.strip():
+        raise RuntimeError("Calendar booking address must not be empty")
     identity = json.dumps([owner_id, idempotency_key], separators=(",", ":"))
     event_id = "lifeline" + hashlib.sha256(identity.encode()).hexdigest()
     body = {

@@ -93,12 +93,16 @@ confirming the wrong event. Timeouts do not return a receipt; a later retry with
 the same key can recover a previously committed insert. Tokens, URLs and vendor
 response bodies are not included in adapter error messages.
 
-**Owner-approved demo limitation:** Booking has no address field in the shared
-contract. Resolve the known demo clinic name from `backend/fixtures/clinics.json`
-and reject unknown clinics before any insert. Before Calendar supports arbitrary
-live-discovered clinics, the backend/shared owners must add an address to the
-booking contract; do not guess it or substitute an unrelated fixture. No current
-adapter signatures or shared schemas were changed for this demo implementation.
+`Booking.address: str | None = None` now carries the selected clinic address.
+The orchestrator (#11, backend owner) must copy `Clinic.address` into this field
+when building a confirmed Booking. The adapter uses a supplied address verbatim,
+even when the clinic name collides with a fixture name. An explicitly blank
+address fails before insertion. Only an absent address (`None`, the backwards
+compatible default) falls back to the known fixture clinic by name; unknown
+clinics without an address fail closed. The fixture fallback supports existing
+mock callers, not arbitrary live bookings. Public function signatures and
+`shared/task.schema.json` (the API projection) are unchanged. No backend files
+are edited here; backend population of this optional field is a named dependency.
 
 The live hand test uses only `free_windows`; no real calendar event was inserted.
 Event creation, duplicate recovery, mismatched receipts and network errors are

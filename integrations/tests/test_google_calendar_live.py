@@ -198,3 +198,36 @@ def test_unknown_mode_fails_before_any_query(vendor, monkeypatch):
     with pytest.raises(RuntimeError, match="CALENDAR_MODE"):
         calendar.free_windows("mary", "2026-11-24T14:00:00Z", "2026-11-24T23:00:00Z")
     assert vendor.queries == []
+
+
+def test_live_clinic_outside_fixture_uses_booked_address(vendor, booking):
+    booking = Booking.model_validate(
+        {
+            **booking.model_dump(),
+            "clinic": "New live clinic",
+            "address": "42 Selected Clinic Avenue",
+        }
+    )
+    receipt = calendar.create_event("mary", booking, "live:calendar")
+    event = vendor.events[receipt.event_id]
+    assert event["location"] == booking.address
+    assert "42 Selected Clinic Avenue" in event["description"]
+    assert "New live clinic" in event["description"]
+
+
+def test_selected_address_wins_over_fixture_name_collision(vendor, booking):
+    booking = Booking.model_validate(
+        {**booking.model_dump(), "address": "99 Actual Clinic Road"}
+    )
+    receipt = calendar.create_event("mary", booking, "collision:calendar")
+    event = vendor.events[receipt.event_id]
+    assert event["location"] == "99 Actual Clinic Road"
+    assert "123 Main St" not in event["description"]
+
+
+@pytest.mark.parametrize("address", ["", "   "])
+def test_explicit_empty_address_never_falls_back_to_fixture(vendor, booking, address):
+    booking = Booking.model_validate({**booking.model_dump(), "address": address})
+    with pytest.raises(RuntimeError, match="address"):
+        calendar.create_event("mary", booking, "empty:calendar")
+    assert vendor.inserts == 0
