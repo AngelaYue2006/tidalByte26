@@ -1,12 +1,11 @@
 # Scenario results
 
-**Commit tested:** `f269ac6` on `main` (backend with approvals and the Twilio SMS webhook from #22, receipts and demo reset from #24, integrations, shared and fixtures as merged on 2026-11-21).
+**Commit tested:** `6441ed5` on `main` (backend with approvals and the Twilio SMS webhook from #22, receipts and demo reset from #24, the Nano-written contact request and contact reply handling from #23, integrations, shared and fixtures as merged on 2026-11-21).
 **Command:** `pytest -q tests/` from the repo root in the shared venv; `scripts/check.sh` ran the same files with the
 backend and integrations suites. Every adapter in mock mode; no socket left the process.
 
-**Summary:** 53 passed, 1 xfailed (22 scenario tests passed, 1 waits on an unmerged PR). Pass means the scenario's
-expected result from `docs/MVP.md` holds; xfail means the behaviour belongs to a PR that has not merged, and the test is
-written to the documented contract so it turns green when it does.
+**Summary:** 54 passed, nothing skipped or expected to fail (23 scenario tests, all green). Pass means the scenario's
+expected result from `docs/MVP.md` holds against the merged backend.
 
 | ID | Scenario | Test | Result | Note |
 |---|---|---|---|---|
@@ -19,9 +18,7 @@ written to the documented contract so it turns green when it does.
 | T7 | Clinic says "we'll call back to confirm" | `T07_tentative_booking.py` (2 tests) | pass | `booked` with `tentative: true`, empty calendar text, no calendar write, booking `calendar_event_id: null`; a rejected confirmation fails the task with `BOOKING_REJECTED` |
 | T8 | Repeated Twilio webhook | `T08_duplicate_webhook.py` (3 tests) | pass | Request, approval and contact-offer keys replay once each through the receipts table; a repeated ElevenLabs post-call webhook adds no event; a replayed Twilio `YES` (same `MessageSid`) is answered 200 with TwiML both times and yields one `approved` via SMS, one booking, one calendar event, no extra SMS |
 | T9 | Reply from a number not on the allowlist | `T09_unknown_sender.py` (2 tests) | pass | A viewer outside owner and contact gets 404s, an empty history and an empty snapshot. Inbound SMS from an unknown number is answered 200 with empty TwiML (Twilio retries anything else), the reply carries no task data, a warning is logged without the sender's number or task text, and nothing changes |
-| T10 | Contact declines | `T10_contact_declines.py` | pass / xfail | Dashboard decline keeps `awaiting_contact`, the owner sees `contact_reply`, no `ride_confirmed`; a later offer completes once: pass. SMS `NO` adds `contact_reply` plus an owner-only `CONTACT_DECLINED` note and keeps waiting, a later `YES` confirms once: xfail, #23 (PR #81) |
+| T10 | Contact declines | `T10_contact_declines.py` (2 tests) | pass | Dashboard decline keeps `awaiting_contact`: `contact_reply` for both roles plus an owner-only `CONTACT_DECLINED` note in one transaction, no `ride_confirmed`; a later offer completes once. SMS `NO` through the signed webhook does the same and keeps waiting; a later `YES` confirms once (#23) |
 | T11 | Dashboard refresh mid-call | `T11_refresh_snapshot.py` | pass | Snapshot mid-call restores two finished cards, the live card and its transcripts; the reconnect sends only ids above the snapshot cursor; snapshot plus stream equals the persisted trail once |
 | T12 | Two runs then reset | `T12_two_runs_reset.py` (2 tests) | pass | Two full runs, both `completed`, history newest first for both roles, no shared ids or receipts. `POST /api/demo/reset` stops pipelines, wipes every table, reseeds the contact and two simulated past runs (old ids answer 404, the snapshot shows the newest seeded run), a third run completes; 403 outside development |
 
-Refresh this file after #81 merges: run `pytest -q tests/ -rA`, remove the T10 `xfail` marker once it turns `XPASS`,
-and update the commit, summary and the T10 row.

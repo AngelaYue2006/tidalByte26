@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from harness import CONTACT, CONTACT_PHONE, OWNER_PHONE, Lab
 
 
@@ -25,7 +24,11 @@ def test_t10_dashboard_decline_keeps_the_task_open_and_tells_the_owner(lab: Lab)
     assert reply["contact"] == "Sarah" and reply["offer"]["can_drive"] is False, "the owner's view carries the decline"
     assert reply["visibility"] == "contact", "both roles see it"
     assert "ride_confirmed" not in lab.types(task_id) and "notified" not in lab.types(task_id)
-    assert lab.types(task_id)[-1] == "contact_reply"
+    # the decline and the owner's note commit together (#23): the reply both roles see, then the owner-only CONTACT_DECLINED
+    assert lab.types(task_id)[-2:] == ["contact_reply", "task_updated"]
+    note = lab.events(task_id)[-1]
+    assert note["reason"] == "CONTACT_DECLINED" and note["status"] == "awaiting_contact" and note["visibility"] == "owner"
+    assert "CONTACT_DECLINED" not in str(lab.events(task_id, CONTACT)), "the contact never sees the owner's note"
     assert lab.of_type(task_id, "contact_reply", CONTACT) == lab.of_type(task_id, "contact_reply")
 
     # a second decline is a second honest reply; a later offer still closes the task, once
@@ -37,7 +40,6 @@ def test_t10_dashboard_decline_keeps_the_task_open_and_tells_the_owner(lab: Lab)
     lab.validate_trail(task_id)
 
 
-@pytest.mark.xfail(reason="#23 (PR #81): the contact's SMS reply through POST /api/webhooks/twilio/sms is not merged yet", strict=False)
 def test_t10_sms_no_keeps_waiting_and_a_later_yes_confirms(lab: Lab):
     task_id = booked_and_waiting(lab)
     owner_texts = len(lab.sms_to(OWNER_PHONE))

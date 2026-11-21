@@ -71,15 +71,23 @@ def validate_event(event: dict) -> None:
 
 
 class FakeNano:
-    """Nano on the device: answers the intake prompt with a fixed proposal. The deterministic backstop still runs."""
+    """Nano on the device: answers the intake prompt with a fixed proposal (the deterministic backstop still runs) and
+    the contact-message prompt (#23) with a scoped message built from the appointment facts in the record it is given."""
 
     name = "fake-nano"
 
     def __init__(self, proposal: dict | None = None) -> None:
         self.proposal = dict(proposal or DEMO_INTAKE)
-        self.utterances: list[str] = []
+        self.utterances: list[str] = []  # the raw requests the intake prompt received
+        self.contact_records: list[dict] = []  # the full records the contact prompt received, both on the device only
 
     def complete_json(self, system: str, user: str, schema: dict) -> dict:
+        if "message" in schema.get("properties", {}):
+            record = json.loads(user)
+            self.contact_records.append(record)
+            a = record["appointment"]
+            return {"message": (f"Hi {record['contact']['first_name']}, {a['owner_first_name']} has a {a['for']} at {a['clinic']} on {a['when']}, "
+                                f"{a['address']}. No accessible ride was found. Can you drive? Reply YES or NO.")}
         self.utterances.append(user)
         return dict(self.proposal)
 

@@ -39,8 +39,10 @@ def test_t2_chips_and_every_outbound_payload_are_free_of_the_dropped_fields(lab_
     lab.offer(task_id, can_drive=True)
     task = lab.wait_for(task_id, "completed")
 
-    # the device saw the raw text once; the owner's own view keeps it
+    # the device saw the raw text once at intake and once more, with the full record, when Nano wrote the contact
+    # message (#23); both prompts stay on the device. The owner's own view keeps the text.
     assert lab.nano.utterances == [RAW] and task["request_text"] == RAW
+    assert len(lab.nano.contact_records) == 1 and lab.nano.contact_records[0]["spoken_request"] == RAW
 
     # chips: the redacted request only
     assert task["chips"] == DEMO_CHIPS and leaked(" ".join(task["chips"])) == []
