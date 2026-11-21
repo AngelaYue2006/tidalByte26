@@ -10,6 +10,7 @@ from app import approvals
 from app.adapters import Deps
 from app.config import load_settings
 from app.main import create_app
+from app.routers.webhooks import handle_inbound
 from fastapi.testclient import TestClient
 
 from tests.stand_ins import FakeNano, FakeSuper
@@ -49,10 +50,20 @@ def client(monkeypatch, tmp_path):
 
 
 def sms(client, body, *, sender=OWNER_PHONE, sid="SM0001", task_id=None):
+    """Post the Twilio form through the route (always 200 with empty TwiML), then read the handler's outcome by re-delivering
+    the same MessageSid, which is idempotent and reports the same result."""
     form = {"From": sender, "To": "+15555550199", "Body": body, "MessageSid": sid}
     if task_id:
         form["task_id"] = task_id
-    return client.post("/api/webhooks/twilio/sms", data=form)
+    r = client.post("/api/webhooks/twilio/sms", data=form)
+    assert_empty_twiml(r)
+    return handle_inbound(client.app, form)
+
+
+def assert_empty_twiml(r):
+    assert r.status_code == 200, (r.status_code, r.text)
+    assert r.headers["content-type"].startswith("text/xml")
+    assert r.text == '<?xml version="1.0" encoding="UTF-8"?><Response/>'
 
 
 def types(client, task_id):
@@ -65,9 +76,7 @@ def types(client, task_id):
 def test_owner_sms_yes_approves_and_the_pipeline_continues(client):
     task_id = start(client)
     wait_for(client, task_id, "awaiting_approval")
-    r = sms(client, "YES")
-    assert r.status_code == 200
-    assert r.json() == {"ok": True, "task_id": task_id, "status": "approved", "applied": True}
+    assert sms(client, "YES") == {"ok": True, "task_id": task_id, "status": "approved", "applied": True}
     wait_for(client, task_id, "awaiting_contact")
     approved = [e for e in events(client, task_id) if e["type"] == "approved"]
     assert approved == [{**approved[0], "by": "mary", "via": "sms"}]
@@ -79,7 +88,7 @@ def test_owner_sms_yes_approves_and_the_pipeline_continues(client):
 def test_yes_synonyms_approve(client, word):
     task_id = start(client)
     wait_for(client, task_id, "awaiting_approval")
-    assert sms(client, word).json()["applied"] is True
+    assert sms(client, word)["applied"] is True
     wait_for(client, task_id, "awaiting_contact")
 
 
@@ -87,8 +96,7 @@ def test_yes_synonyms_approve(client, word):
 def test_owner_sms_no_cancels(client, word):
     task_id = start(client)
     wait_for(client, task_id, "awaiting_approval")
-    r = sms(client, word)
-    assert r.json() == {"ok": True, "task_id": task_id, "status": "cancelled", "applied": True}
+    assert sms(client, word) == {"ok": True, "task_id": task_id, "status": "cancelled", "applied": True}
     wait_for(client, task_id, "cancelled")
     assert "approved" not in types(client, task_id) and "booked" not in types(client, task_id)
     last = [e for e in events(client, task_id) if e["type"] == "task_updated"][-1]
@@ -98,12 +106,12 @@ def test_owner_sms_no_cancels(client, word):
 def test_duplicate_sms_is_a_no_op(client):
     task_id = start(client)
     wait_for(client, task_id, "awaiting_approval")
-    first = sms(client, "YES", sid="SM-dup").json()
-    again = sms(client, "YES", sid="SM-dup").json()  # Twilio retried the webhook
+    first = sms(client, "YES", sid="SM-dup")
+    again = sms(client, "YES", sid="SM-dup")  # Twilio retried the webhook
     assert first == again
     wait_for(client, task_id, "awaiting_contact")
     assert types(client, task_id).count("approved") == 1
-    later = sms(client, "YES", sid="SM-new").json()  # a second, different YES after approval
+    later = sms(client, "YES", sid="SM-new")  # a second, different YES after approval
     assert later["applied"] is False and later["status"] in ("booking", "transport", "awaiting_contact", "completed")
     assert types(client, task_id).count("approved") == 1
 
@@ -111,8 +119,7 @@ def test_duplicate_sms_is_a_no_op(client):
 def test_contact_number_cannot_approve(client):
     task_id = start(client)
     wait_for(client, task_id, "awaiting_approval")
-    r = sms(client, "YES", sender=CONTACT_PHONE)
-    assert r.status_code == 200 and r.json() == {"ok": True, "ignored": "not_owner"}
+    assert sms(client, "YES", sender=CONTACT_PHONE) == {"ok": True, "ignored": "not_owner"}
     time.sleep(0.2)
     assert client.get(f"/api/tasks/{task_id}?viewer_id=mary").json()["status"] == "awaiting_approval"
     assert "approved" not in types(client, task_id)
@@ -121,10 +128,10 @@ def test_contact_number_cannot_approve(client):
 def test_unknown_number_is_ignored_and_leaks_nothing(client):
     task_id = start(client)
     wait_for(client, task_id, "awaiting_approval")
-    r = sms(client, "YES", sender="+15555550177")
-    assert r.status_code == 200
-    assert r.json() == {"ok": False, "ignored": "unverified_sender"}
-    assert task_id not in r.text and "Bright" not in r.text
+    form = {"From": "+15555550177", "To": "+15555550199", "Body": "YES", "MessageSid": "SM-x"}
+    r = client.post("/api/webhooks/twilio/sms", data=form)
+    assert_empty_twiml(r)  # the same empty TwiML as for anyone: nothing about the task in the reply
+    assert handle_inbound(client.app, form) == {"ok": False, "ignored": "unverified_sender"}
     time.sleep(0.2)
     assert client.get(f"/api/tasks/{task_id}?viewer_id=mary").json()["status"] == "awaiting_approval"
 
@@ -132,18 +139,18 @@ def test_unknown_number_is_ignored_and_leaks_nothing(client):
 def test_unrecognised_text_and_nothing_waiting_are_ignored(client):
     task_id = start(client)
     wait_for(client, task_id, "awaiting_approval")
-    assert sms(client, "What time is it?").json() == {"ok": True, "ignored": "not_an_answer"}
+    assert sms(client, "What time is it?") == {"ok": True, "ignored": "not_an_answer"}
     assert client.get(f"/api/tasks/{task_id}?viewer_id=mary").json()["status"] == "awaiting_approval"
     sms(client, "YES", sid="SM-go")
     wait_for(client, task_id, "awaiting_contact")
-    assert sms(client, "NO", sid="SM-late").json()["ignored"] == "not_awaiting_approval"
+    assert sms(client, "NO", sid="SM-late")["ignored"] == "not_awaiting_approval"
 
 
 def test_correlated_task_id_must_belong_to_the_owner(client):
     task_id = start(client)
     wait_for(client, task_id, "awaiting_approval")
-    assert sms(client, "YES", task_id="not-a-task").json() == {"ok": True, "ignored": "nothing_waiting"}
-    assert sms(client, "YES", task_id=task_id, sid="SM-corr").json()["applied"] is True
+    assert sms(client, "YES", task_id="not-a-task") == {"ok": True, "ignored": "nothing_waiting"}
+    assert sms(client, "YES", task_id=task_id, sid="SM-corr")["applied"] is True
 
 
 def test_decision_words():
@@ -164,7 +171,7 @@ def test_dashboard_approve_emits_via_dashboard_and_sms_then_is_idempotent(client
     approved = [e for e in events(client, task_id) if e["type"] == "approved"]
     assert approved[0]["by"] == "mary" and approved[0]["via"] == "dashboard"
     wait_for(client, task_id, "awaiting_contact")
-    assert sms(client, "YES").json()["applied"] is False
+    assert sms(client, "YES")["applied"] is False
     assert types(client, task_id).count("approved") == 1
 
 
@@ -186,7 +193,7 @@ def test_t6_no_answer_sends_one_reminder_and_keeps_waiting(monkeypatch, tmp_path
         assert "booked" not in types(client, task_id) and "approved" not in types(client, task_id)
         sarah = events(client, task_id, viewer="sarah")
         assert not any(e.get("reason") == "APPROVAL_TIMEOUT" for e in sarah)  # the reminder is the owner's business
-        assert sms(client, "YES").json()["applied"] is True  # the late answer still counts
+        assert sms(client, "YES")["applied"] is True  # the late answer still counts
         wait_for(client, task_id, "awaiting_contact")
         assert types(client, task_id).count("approved") == 1
     finally:

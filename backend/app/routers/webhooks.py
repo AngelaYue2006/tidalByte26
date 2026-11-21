@@ -3,15 +3,16 @@
 The Twilio SMS route is here (#22); the ElevenLabs post-call route lands with #21. The SMS path trusts nothing
 until `integrations.sms_twilio.parse_inbound` has verified the sender (mock: fixture people on the allowlist;
 live: #27 adds the Twilio signature) and returns an InboundSms. An owner's YES approves the task that is
-waiting, NO cancels it; anything else, or any unverified sender, is acknowledged with 200 and ignored, so Twilio
-does not retry and nothing about the task leaks (T9). Every reply is keyed by MessageSid (T8).
+waiting, NO cancels it; anything else, or any unverified sender, is ignored. Every inbound, applied or not, is
+answered 200 with an empty TwiML <Response/> (the documented no-action reply; a non-2xx makes Twilio retry) that
+says nothing about any task (T9). Every reply is keyed by MessageSid (T8).
 """
 
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from sqlmodel import Session, select
 
 from app import approvals
@@ -39,13 +40,26 @@ def _waiting_task(engine, owner_id: str, correlation: str | None) -> Task | None
         return session.exec(select(Task).where(Task.owner_id == owner_id).order_by(Task.created_at.desc(), Task.id.desc())).first()
 
 
-@router.post("/twilio/sms")
-async def twilio_sms(request: Request) -> dict:
-    form = await request.form()
+EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response/>'
+
+
+@router.post("/twilio/sms", response_class=Response)
+async def twilio_sms(request: Request) -> Response:
+    """Always 200 with empty TwiML, the documented no-action reply, for every inbound: applied, ignored or duplicate.
+    (A trial account logs error 12300 "Direct TwiML XML is not supported" on this reply; the message is still received.)
+    The outcome goes to the log and to `handle_inbound` for tests; the task state is the record."""
+    outcome = handle_inbound(request.app, await request.form())
+    log.info("inbound SMS outcome: %s", {k: v for k, v in outcome.items() if k != "task_id"})
+    return Response(content=EMPTY_TWIML, media_type="text/xml")
+
+
+def handle_inbound(app, form) -> dict:
+    """Verify the sender, read the answer, apply it once. Returns what happened (for the log and tests), never raises for
+    bad input: an unverified sender or a malformed form is simply ignored."""
     try:
         inbound = sms_twilio.parse_inbound(form)
     except RuntimeError as exc:
-        # UNVERIFIED_SENDER or a malformed form: say nothing about any task. Twilio gets its 200 and does not retry.
+        # UNVERIFIED_SENDER or a malformed form: say nothing about any task.
         log.warning("inbound SMS ignored: %s", str(exc).split(":")[0])
         return {"ok": False, "ignored": "unverified_sender"}
     if inbound.role != "owner":
@@ -54,7 +68,7 @@ async def twilio_sms(request: Request) -> dict:
     decision = approvals.decision_from_text(inbound.body)
     if decision is None:
         return {"ok": True, "ignored": "not_an_answer"}
-    engine, bus, pipeline = request.app.state.engine, request.app.state.bus, request.app.state.pipeline
+    engine, bus, pipeline = app.state.engine, app.state.bus, app.state.pipeline
     owner_id = _owner_id_for(inbound.from_e164)
     if owner_id is None:
         return {"ok": False, "ignored": "unverified_sender"}
