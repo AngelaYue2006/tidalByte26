@@ -195,21 +195,30 @@ def _validate_outgoing(utterance: str, user: UserRecord, request: IntakeRequest)
     leaks = backstop.identifier_values(utterance) + _owner_values(user)
     data = request.model_dump()
 
+    # care_type: only appointment vocabulary may leave. A name, a symptom or an unknown procedure refuses the request.
     if backstop.unsafe_terms(data["care_type"], leaks) or re.search(r"\d", data["care_type"]):
         raise IntakeError(f"{INTAKE_INCOMPLETE}: care type carried something that must not leave the device")
+    if unknown := backstop.unsupported_care_terms(data["care_type"]):
+        log.warning("intake: care type refused, %d word(s) outside the appointment vocabulary", len(unknown))
+        raise IntakeError(f"{INTAKE_INCOMPLETE}: care type is not a supported appointment term")
 
+    # insurance_carrier: only a carrier the backstop knows, in its canonical spelling, or null.
     carrier = data.get("insurance_carrier")
-    if isinstance(carrier, str) and (backstop.unsafe_terms(carrier, leaks) or re.search(r"\d", carrier) or len(carrier.split()) > 4):
-        data["insurance_carrier"] = None
-        log.warning("intake: insurance carrier replaced with null after a leak check")
+    if isinstance(carrier, str):
+        canonical = backstop.extract_carrier(carrier)
+        if canonical != carrier:
+            data["insurance_carrier"] = canonical
+            log.warning("intake: insurance carrier %s", "normalised" if canonical else "replaced with null")
 
+    # search_area: "near home" or a place with a state code; anything else (a name, an address) becomes "near home".
     area = data.get("search_area") or "near home"
-    if backstop.unsafe_terms(area, leaks) or re.search(r"\d", area) or backstop.detect_identifiers(area) or len(area.split()) > 4:
+    if area != "near home" and (
+        not backstop.looks_like_place(area) or backstop.unsafe_terms(area, leaks) or backstop.detect_identifiers(area)
+    ):
         data["search_area"] = "near home"
-        for name in ("address", "patient_name"):
-            if name not in data["dropped_fields"] and (name == "address") == bool(backstop.detect_identifiers(area) or re.search(r"\d", area)):
-                data["dropped_fields"].append(name)
-                break
+        dropped_kind = "address" if backstop.detect_identifiers(area) or re.search(r"\d", area) else "patient_name"
+        if dropped_kind not in data["dropped_fields"]:
+            data["dropped_fields"].append(dropped_kind)
         log.warning("intake: search area replaced with 'near home' after a leak check")
 
     data["dropped_fields"].sort(key=DROPPABLE_FIELDS.index)

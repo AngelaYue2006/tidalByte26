@@ -309,12 +309,50 @@ def test_content_after_a_connective_is_cut_from_care_type(care_type, cleaned):
 @pytest.mark.parametrize(
     "care_type",
     ["toothache dentist", "metformin blood test", "lisinopril refill", "mary johnson cleaning", "Mary Johnson", "knee cleaning",
-     "walker dental cleaning", "diabetes checkup"],
+     "walker dental cleaning", "pacemaker checkup", "cleaning alex taylor", "dental cleaning sarah", "Dr. Patel cleaning",
+     "cleaning at Bright Smile", "sleepy time nap"],
 )
-def test_sensitive_care_type_fails_closed(care_type):
+def test_care_type_outside_the_appointment_vocabulary_fails_closed(care_type):
+    """A name (the owner's, a contact's, a stranger's), a symptom, a drug or an unknown word never leaves as care_type."""
     row = ROWS[0]
     with pytest.raises(IntakeError, match="INTAKE_INCOMPLETE"):
         run(row, AdversarialModel(row, care_type=care_type))
+
+
+def test_every_fixture_care_type_is_in_the_vocabulary():
+    for row in ROWS:
+        assert backstop.unsupported_care_terms(row["expected"]["care_type"]) == [], row["id"]
+
+
+CONTACT_ON_BEHALF = {
+    "id": "inline_contact_on_behalf",
+    "now": "2026-11-23T09:00:00-06:00",
+    "utterance": "This is Sarah Johnson calling for my mother. She needs a dental cleaning this week, under $150, with Delta Dental, and a ride.",
+    "expected": {
+        "care_type": "dental cleaning", "budget_max": 150, "insurance_carrier": "Delta Dental",
+        "time_range": {"start": "2026-11-23T00:00:00-06:00", "end": "2026-11-29T23:59:59-06:00"},
+        "needs_ride": True, "search_area": "near home",
+    },
+    "expected_dropped": ["patient_name"],
+}
+
+
+def test_contact_name_absent_from_owner_record_never_leaves():
+    """The speaker is the contact, not the owner, so her name is in no on-device record. It still may not leave."""
+    row = CONTACT_ON_BEHALF
+    clean = run(row, PerfectModel(row))
+    assert clean.model_dump(exclude={"dropped_fields"}) == row["expected"]
+    with pytest.raises(IntakeError, match="INTAKE_INCOMPLETE"):
+        run(row, AdversarialModel(row, care_type="dental cleaning sarah"))
+    with pytest.raises(IntakeError, match="INTAKE_INCOMPLETE"):
+        run(row, AdversarialModel(row, care_type="Sarah Johnson"))
+    area = run(row, AdversarialModel(row, search_area="near Sarah Johnson"))
+    assert area.search_area == "near home" and "patient_name" in area.dropped_fields
+    carrier_row = row | {"utterance": row["utterance"].replace("with Delta Dental, ", "")}
+    carrier_row["expected"] = carrier_row["expected"] | {"insurance_carrier": None}
+    carrier = run(carrier_row, AdversarialModel(carrier_row, insurance_carrier="Sarah Johnson"))
+    assert carrier.insurance_carrier is None
+    assert "sarah" not in json.dumps([clean.model_dump(), area.model_dump(), carrier.model_dump()]).lower()
 
 
 @pytest.mark.parametrize(
@@ -323,9 +361,14 @@ def test_sensitive_care_type_fails_closed(care_type):
         ("search_area", "near Mary Johnson", "near home"),
         ("search_area", "100 Example Street, Chicago", "near home"),
         ("search_area", "the clinic by my knee doctor", "near home"),
+        ("search_area", "Evanston", "near home"),
+        ("search_area", "near Alex Taylor", "near home"),
         ("insurance_carrier", "Delta Dental DEMO-0000-0000-0001", None),
-        ("insurance_carrier", "Medicare for her diabetes", None),
+        ("insurance_carrier", "Medicare for her diabetes", "Medicare"),
         ("insurance_carrier", "Mary Johnson", None),
+        ("insurance_carrier", "Alex Taylor", None),
+        ("insurance_carrier", "delta", "Delta Dental"),
+        ("insurance_carrier", "Some Unknown Plan", None),
     ],
 )
 def test_sensitive_carrier_or_area_falls_back_to_safe_value(field, value, safe):

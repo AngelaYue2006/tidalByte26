@@ -235,3 +235,42 @@ def unsafe_terms(text: str, extra_values: list[str] = ()) -> list[str]:
     found += [m.group(0) for m in _DRUG_SUFFIX.finditer(low)]
     found += [v for v in extra_values if v and len(v) >= 3 and v.lower() in low]
     return found
+
+
+# The appointment words a care_type may be made of. Anything else (a name, a symptom, an unknown procedure) fails closed:
+# the request is refused and the speaker is asked again, rather than an unknown word leaving the device.
+CARE_TYPE_VOCAB: frozenset[str] = frozenset(
+    {
+        "dental", "dentist", "teeth", "tooth", "cleaning", "filling", "crown", "root", "canal", "extraction", "denture",
+        "dentures", "orthodontic", "orthodontist", "braces", "whitening", "gum", "periodontal", "oral", "hygiene",
+        "eye", "eyes", "vision", "optometry", "optometrist", "ophthalmology", "ophthalmologist", "glasses", "contacts",
+        "hearing", "audiology", "audiologist", "aid", "aids", "fitting", "ent",
+        "flu", "shot", "shots", "vaccine", "vaccination", "booster", "covid", "shingles", "pneumonia", "tetanus", "immunization",
+        "physical", "annual", "wellness", "checkup", "check-up", "check", "up", "exam", "examination", "visit", "consult",
+        "consultation", "appointment", "primary", "care", "doctor", "gp", "nurse", "follow-up", "followup", "follow",
+        "blood", "test", "tests", "lab", "labs", "work", "panel", "urine", "cholesterol", "glucose", "a1c",
+        "x-ray", "xray", "mri", "ct", "scan", "ultrasound", "mammogram", "colonoscopy", "screening", "bone", "density", "dexa",
+        "dermatology", "dermatologist", "skin", "podiatry", "podiatrist", "foot", "feet", "nail",
+        "therapy", "physiotherapy", "physiotherapist", "rehab", "rehabilitation", "occupational", "speech", "massage",
+        "chiropractic", "chiropractor", "adjustment", "acupuncture",
+        "cardiology", "cardiologist", "heart", "echo", "echocardiogram", "ekg", "ecg", "stress",
+        "neurology", "neurologist", "orthopedic", "orthopedics", "orthopedist", "urology", "urologist", "gynecology",
+        "gynecologist", "obgyn", "endocrinology", "endocrinologist", "gastroenterology", "gastroenterologist", "rheumatology",
+        "rheumatologist", "pulmonology", "pulmonologist", "oncology", "oncologist", "nephrology", "nephrologist", "allergy",
+        "allergist", "psychiatry", "psychiatrist", "counseling", "counselling", "psychologist", "psychotherapy",
+        "pharmacy", "refill", "medication", "review", "injection", "infusion", "dialysis", "sleep", "study",
+        "pre-op", "post-op", "surgical", "surgery", "specialist", "referral", "second", "opinion", "telehealth", "video",
+        "home", "health", "aide", "memory", "clinic", "geriatric", "geriatrics", "fall", "risk", "assessment", "diabetes", "diabetic",
+    }
+)
+_PLACE = re.compile(r"^[A-Z][A-Za-z.'\- ]{1,40}, [A-Z]{2}$")
+
+
+def unsupported_care_terms(care_type: str) -> list[str]:
+    """Words in a normalised care_type that are not appointment vocabulary."""
+    return [w for w in care_type.split() if w not in CARE_TYPE_VOCAB]
+
+
+def looks_like_place(area: str) -> bool:
+    """"Evanston, IL" or "Oak Park, IL": a place name with a state code, at most four words."""
+    return bool(_PLACE.match(area)) and len(area.split()) <= 4
