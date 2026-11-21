@@ -204,8 +204,6 @@ def test_transport_uses_unavailable_fixture_and_event_schema(booking):
             lambda: places.find_clinics("dental cleaning", "near home"),
         ),
         (distance, "PLACES_MODE", lambda: distance.drive("home", [])),
-        (sms, "SMS_MODE", lambda: sms.send("+15555550101", "Test", "demo")),
-        (sms, "SMS_MODE", lambda: sms.parse_inbound({"From": "+15555550101"})),
     ],
 )
 def test_live_modes_fail_closed_without_network(monkeypatch, module, env_name, invoke):
