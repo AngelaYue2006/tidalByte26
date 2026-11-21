@@ -17,7 +17,8 @@ Mary, 78, taps the microphone on the dashboard: "I need a dental cleaning this w
 3. [docs/MVP.md](docs/MVP.md) — exact demo scope, acceptance criteria, team split, gates, test matrix.
 4. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — pipeline, data model, REST and SSE contracts, adapter signatures, environment variables.
 5. [AGENTS.md](AGENTS.md) — rules for humans and coding agents working in this repo.
-6. [docs/AGENT_BOARD.md](docs/AGENT_BOARD.md) — optional GitHub-issue message board.
+6. [docs/PITCH.md](docs/PITCH.md) — 3-minute demo script, Devpost copy, Nemotron explanation; refresh metrics with `python scripts/metrics_summary.py`.
+7. [docs/AGENT_BOARD.md](docs/AGENT_BOARD.md) — optional GitHub-issue message board.
 
 Archived: `docs/archive/` holds the original Slotted plan and handoff. The LifeLine v0 docs (inbound-call design) are in git history at commit `f09f0a7`.
 

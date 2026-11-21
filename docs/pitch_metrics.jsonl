@@ -1,0 +1,9 @@
+{"metric": "redaction_kept", "value": null, "n": 20, "source": "pending_issue_25", "note": "Fill from app/metrics.py / T2 once #25 lands."}
+{"metric": "redaction_dropped", "value": null, "n": 20, "source": "pending_issue_25", "note": "Fill from app/metrics.py / T2 once #25 lands."}
+{"metric": "intake_latency_p50_ms", "value": null, "source": "pending_issue_25", "note": "On-device Nano via Ollama; DECISIONS.md expects ~1 s. Refresh from metrics.jsonl."}
+{"metric": "intake_latency_p95_ms", "value": null, "source": "pending_issue_25", "note": "Refresh from metrics.jsonl."}
+{"metric": "call_agent_first_token_p50_ms", "value": null, "source": "pending_issue_25", "note": "Lightning custom-LLM proxy first token."}
+{"metric": "ranking_latency_p50_ms", "value": null, "source": "pending_issue_25", "note": "Super ranker wall time."}
+{"metric": "bytes_to_cloud_per_request", "value": null, "source": "pending_issue_25", "note": "Should be IntakeRequest JSON only; never the raw utterance."}
+{"metric": "time_to_booked_lifeline_s", "value": 15.5, "source": "measured", "measured_at": "2026-11-21", "note": "frontend/prototype/index.html SCENARIO timestamps: request at 0 → booked at 15500 ms (compressed demo, mock receptionists)."}
+{"metric": "time_to_booked_manual_s", "value": 201.5, "source": "measured", "measured_at": "2026-11-21", "note": "Stopwatch desk rehearsal: three sequential mock clinic dialogues with timed hold/IVR (45–55 s each), speak scripts at ~155 wpm, then compare and write a booking note. No LifeLine. Wall clock 3m 21.5s."}
