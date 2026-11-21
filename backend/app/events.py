@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC
 
@@ -17,6 +19,8 @@ from sqlmodel import Session, select
 
 from app.db import session_scope
 from app.models import Contact, Event, Task
+
+log = logging.getLogger(__name__)
 
 VISIBILITIES: tuple[str, ...] = ("owner", "contact", "internal")
 
@@ -38,6 +42,9 @@ EVENT_TYPES: tuple[str, ...] = (
     "ride_confirmed",
     "task_updated",
 )
+
+# Events whose `sms_user` is the owner's own text; projected away for the contact.
+OWNER_SMS_EVENTS: frozenset[str] = frozenset({"booked", "notified"})
 
 _ROLE_SEES: dict[str, frozenset[str]] = {
     "owner": frozenset({"owner", "contact"}),
@@ -73,6 +80,12 @@ def project_event(row: Event, role: str) -> dict:
             payload.pop("text", None)
         elif "text" in payload:
             visibility = "owner"
+    if role == "contact" and row.type in OWNER_SMS_EVENTS:
+        # The owner's text can carry price and insurance; the contact's scope is clinic, time, address and the ride need.
+        if row.type == "booked":
+            payload["sms_user"] = ""  # the schema requires the key
+        else:
+            payload.pop("sms_user", None)
     at = row.at if row.at.tzinfo is not None else row.at.replace(tzinfo=UTC)
     return {
         **payload,
@@ -122,7 +135,11 @@ class EventBus:
         for sub in subs:
             if sub.viewer.owner_id != owner_id or not visible_to(sub.viewer.role, row.visibility):
                 continue
-            sub.loop.call_soon_threadsafe(sub.queue.put_nowait, row.id)
+            try:
+                sub.loop.call_soon_threadsafe(sub.queue.put_nowait, row.id)
+            except RuntimeError:  # the subscriber's loop is gone; the stream it fed is over
+                self.unsubscribe(sub)
+                continue
             fed += 1
         return fed
 
@@ -145,8 +162,57 @@ def emit(engine: Engine, bus: EventBus, task_id: str, type: str, payload: dict, 
         session.flush()
         session.refresh(row)
         session.expunge(row)
-    bus.publish(row, owner_id)
+    _fan_out(bus, [row], owner_id)
     return row
+
+
+def _fan_out(bus: EventBus, rows: list[Event], owner_id: str) -> None:
+    """Wake subscribers for committed rows. The rows are authoritative: a fan-out error is logged, never raised, and the
+    stream picks the rows up on its next read past the cursor."""
+    for row in rows:
+        try:
+            bus.publish(row, owner_id)
+        except Exception:
+            log.exception("event %s of task %s was committed but not fanned out; the stream catches up on its next read", row.id, row.task_id)
+
+
+def emit_many(
+    engine: Engine,
+    bus: EventBus,
+    task_id: str,
+    events: list[tuple[str, dict, str]],
+    before: Callable[[Session, Task], None] | None = None,
+) -> list[Event]:
+    """Persist several events (and an optional task change) in one transaction, then fan them out.
+
+    Either every row and the change commit together or nothing does, so a reply that produces two events can never
+    leave half of itself behind. `before(session, task)` runs inside the transaction, for a status transition.
+    """
+    for type_, payload, visibility in events:
+        if type_ not in EVENT_TYPES:
+            raise ValueError(f"unknown event type {type_!r}")
+        if visibility not in VISIBILITIES:
+            raise ValueError(f"unknown visibility {visibility!r}")
+        if "type" in payload:
+            raise ValueError("payload must not carry its own 'type'")
+    rows: list[Event] = []
+    with session_scope(engine) as session:
+        task = session.get(Task, task_id)
+        if task is None:
+            raise LookupError(f"no task {task_id!r}")
+        owner_id = task.owner_id
+        if before is not None:
+            before(session, task)
+        for type_, payload, visibility in events:
+            row = Event(task_id=task_id, type=type_, payload_json=json.dumps(payload, ensure_ascii=False), visibility=visibility)
+            session.add(row)
+            rows.append(row)
+        session.flush()
+        for row in rows:
+            session.refresh(row)
+            session.expunge(row)
+    _fan_out(bus, rows, owner_id)
+    return rows
 
 
 def list_events(session: Session, task_id: str, viewer: Viewer, *, up_to: int | None = None) -> list[dict]:
