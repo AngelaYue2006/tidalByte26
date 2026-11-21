@@ -5,8 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
+
+TURNS_UNIQUE_INDEX = "uq_turns_call_seq"  # also applied to pre-existing databases by db.init_db
 
 
 def new_id() -> str:
@@ -60,7 +62,7 @@ class Call(SQLModel, table=True):
 
 class Turn(SQLModel, table=True):
     __tablename__ = "turns"
-    __table_args__ = (UniqueConstraint("call_id", "seq", name="uq_turns_call_seq"),)  # one line per position per call
+    __table_args__ = (Index(TURNS_UNIQUE_INDEX, "call_id", "seq", unique=True),)  # one line per position per call
 
     id: str = Field(default_factory=new_id, primary_key=True)
     call_id: str = Field(foreign_key="calls.id", index=True)

@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 
 from app.db import session_scope
 from app.models import Contact, Event, Task
+from app.nemotron import intake_backstop
 
 VISIBILITIES: tuple[str, ...] = ("owner", "contact", "internal")
 
@@ -63,9 +64,23 @@ def visible_to(role: str, visibility: str) -> bool:
     return visibility in _ROLE_SEES.get(role, frozenset())
 
 
+REMOVED = "[removed]"
+
+
+def screen_for_contact(text: str) -> str:
+    """Clinic speech as the contact may see it: identifier-shaped values (member IDs, phone numbers, dates of birth,
+    street addresses) found by the same on-device detector that redacts the intake are replaced. The agent's own lines
+    carry only redacted facts already. The owner sees the line as spoken."""
+    for value in sorted(intake_backstop.identifier_values(text), key=len, reverse=True):
+        if value:
+            text = text.replace(value, REMOVED)
+    return text
+
+
 def project_event(row: Event, role: str) -> dict:
     """The flat, schema-valid event for one role. The contact never gets `request.text`; the owner's request, which
-    carries the text, is labelled `visibility: owner` because that is the variant they receive."""
+    carries the text, is labelled `visibility: owner` because that is the variant they receive. A clinic transcript
+    line reaches the contact screened (product rule 4; D6 keeps the call cards visible to both)."""
     payload = json.loads(row.payload_json)
     visibility = row.visibility
     if row.type == "request":
@@ -73,6 +88,8 @@ def project_event(row: Event, role: str) -> dict:
             payload.pop("text", None)
         elif "text" in payload:
             visibility = "owner"
+    if row.type == "transcript" and role == "contact" and payload.get("speaker") == "clinic":
+        payload["text"] = screen_for_contact(str(payload.get("text") or ""))
     at = row.at if row.at.tzinfo is not None else row.at.replace(tzinfo=UTC)
     return {
         **payload,

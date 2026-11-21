@@ -280,6 +280,51 @@ def test_overlapping_retries_write_exactly_one_turn_and_one_event(tmp_path):
             assert len(rows) == 1 and json.loads(rows[0].payload_json)["seq"] == 3
 
 
+def test_existing_database_without_the_index_gets_it_at_startup(tmp_path):
+    import sqlite3
+
+    from app.db import init_db, make_engine
+    from app.models import TURNS_UNIQUE_INDEX
+    from sqlalchemy.exc import IntegrityError
+
+    path = tmp_path / "old.db"
+    con = sqlite3.connect(path)  # the pre-#20 shape: every table, turns without the unique index
+    con.executescript(
+        "CREATE TABLE tasks (id VARCHAR PRIMARY KEY, owner_id VARCHAR NOT NULL, status VARCHAR NOT NULL, intake_json VARCHAR, windows_json VARCHAR, decision_json VARCHAR, booking_json VARCHAR, transport_json VARCHAR, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL);"
+        "CREATE TABLE calls (id VARCHAR PRIMARY KEY, task_id VARCHAR NOT NULL, clinic_name VARCHAR NOT NULL, clinic_phone VARCHAR NOT NULL, distance_mi FLOAT, status VARCHAR NOT NULL, result_json VARCHAR, external_ref VARCHAR, started_at DATETIME, ended_at DATETIME);"
+        "CREATE TABLE turns (id VARCHAR PRIMARY KEY, call_id VARCHAR NOT NULL, seq INTEGER NOT NULL, speaker VARCHAR NOT NULL, text VARCHAR NOT NULL, at DATETIME NOT NULL);"
+        "INSERT INTO tasks VALUES ('t','mary','calling',NULL,NULL,NULL,NULL,NULL,'2026-01-01','2026-01-01');"
+        "INSERT INTO calls VALUES ('c','t','Oak','+15555550113',NULL,'live',NULL,NULL,NULL,NULL);"
+    )
+    con.commit()
+    con.close()
+    engine = make_engine(f"sqlite:///{path}")
+    init_db(engine)
+    indexes = {row[1] for row in sqlite3.connect(path).execute("PRAGMA index_list('turns')")}
+    assert TURNS_UNIQUE_INDEX in indexes
+    with session_scope(engine) as s:
+        s.add(Turn(call_id="c", seq=1, speaker="agent", text="a"))
+    with pytest.raises(IntegrityError), session_scope(engine) as s:
+        s.add(Turn(call_id="c", seq=1, speaker="agent", text="b"))
+    init_db(engine)  # idempotent on the next start
+
+
+def test_contact_sees_clinic_lines_screened_and_owner_sees_them_as_spoken(client, app):
+    leaky = "Sure. I have the patient down as member DEMO-0000-0000-0001, born 03/14/1948, call back on 312-555-0142. Thursday at 9:30 is open."
+    client.post("/v1/chat/completions", json=body())  # first turn: the clinic's price line
+    history = body()["messages"] + [{"role": "assistant", "content": "Yes. Do you take Delta Dental?"}, {"role": "user", "content": leaky}]
+    client.post("/v1/chat/completions", json=body(messages=history))
+    with session_scope(app.state.engine) as s:
+        contact = [e for e in list_events(s, "task-1", Viewer(id="sarah", role="contact", owner_id="mary")) if e.get("speaker") == "clinic"]
+        owner = [e for e in list_events(s, "task-1", Viewer(id="mary", role="owner", owner_id="mary")) if e.get("speaker") == "clinic"]
+    assert owner[-1]["text"] == leaky
+    screened = contact[-1]["text"]
+    for identifier in ("DEMO-0000-0000-0001", "03/14/1948", "312-555-0142"):
+        assert identifier not in screened
+    assert "Thursday at 9:30 is open." in screened and "[removed]" in screened
+    assert contact[0]["text"] == "Yes, we do. A cleaning is $95 with Delta."  # a price is a fact the contact may see
+
+
 def test_turn_and_event_are_written_together_or_not_at_all(client, app, monkeypatch):
     from app.routers import llm_proxy
 
