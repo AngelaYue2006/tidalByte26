@@ -24,7 +24,12 @@ def call_projection(call: Call, meta: str | None = None) -> dict:
     stored = _load(call.result_json)
     # Only a complete, structured result reaches a card. An incomplete or failed call shows no result at all,
     # so no unvalidated text can leak through the projection (invariant 4, product rule 4).
-    complete = isinstance(stored, dict) and stored.get("source") not in (None, "incomplete") and "error" not in stored
+    complete = (
+        isinstance(stored, dict)
+        and "error" not in stored
+        and stored.get("source") != "incomplete"
+        and all(k in stored for k in CALL_RESULT_KEYS)  # the mock voice path stores exactly these four, no source key
+    )
     result = {k: stored[k] for k in CALL_RESULT_KEYS if k in stored} if complete else None
     return {
         "call_id": call.id,
