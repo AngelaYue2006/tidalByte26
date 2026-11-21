@@ -10,14 +10,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import Engine
 from sqlmodel import Session
 
-from app import texts
+from app import receipts, texts
 from app.adapters import Deps
 from app.db import session_scope
 from app.events import EventBus, emit
@@ -27,13 +27,25 @@ from app.nemotron.ranker import timed_rank
 from app.nemotron.types import IntakeRequest, UserRecord
 from app.people import ensure_contacts, load_owner
 from app.ranking import hard_rules, money, no_eligible_offer, slot_label
+from app.routers import (
+    llm_proxy,  # the one transcript recorder, shared with live calls (#87)
+)
 from app.state import transition
-from integrations.types import Booking, CallSpec, Clinic, Offer, Window
+from integrations.types import (
+    Booking,
+    CalendarReceipt,
+    CallSpec,
+    Clinic,
+    Confirmation,
+    MessageReceipt,
+    Offer,
+    Window,
+)
 from integrations.types import IntakeRequest as WireIntakeRequest
 
 log = logging.getLogger(__name__)
 
-APPROVAL_WINDOW = timedelta(minutes=10)
+DEFAULT_APPROVAL_TIMEOUT_S = 10 * 60  # settings.approval_timeout_min wins; this is the fallback for a bare Pipeline()
 CALL_IDS = "abcdefghij"
 
 
@@ -66,19 +78,20 @@ class Run:
     offers: list[Offer] | None = None
     winner: Offer | None = None
     booking: Booking | None = None
+    proxy_specs: dict = field(default_factory=dict)  # call id -> the recorder's CallSpec, loaded once per call
+    transcript_seq: dict[str, int] = field(default_factory=dict)  # call id -> last seq given to a line that arrived without one
 
 
 class Pipeline:
-    def __init__(self, deps: Deps, engine: Engine, bus: EventBus) -> None:
+    def __init__(self, deps: Deps, engine: Engine, bus: EventBus, approval_timeout_s: float = DEFAULT_APPROVAL_TIMEOUT_S) -> None:
         self.deps = deps
         self.engine = engine
         self.bus = bus
+        self.approval_timeout_s = approval_timeout_s
         self._waits: dict[str, asyncio.Event] = {}
         self._claimed: set[str] = set()
         self._tasks: dict[str, asyncio.Task] = {}
-        # Idempotency, in process until #24 persists receipts: request keys -> task id, and per-route replies by key.
-        self.request_keys: dict[str, str] = {}
-        self.replies: dict[tuple[str, str, str], dict] = {}
+        # Idempotency lives in the receipts table (#24): request keys and per-route replies survive a restart.
 
     # ---- entry points -------------------------------------------------------------------------------------------
 
@@ -113,11 +126,35 @@ class Pipeline:
         return task_id in self._waits and task_id not in self._claimed
 
     def replay(self, route: str, task_id: str, key: str) -> dict | None:
-        return self.replies.get((route, task_id, key))
+        """The reply already given for this (route, task, key), or None. Persisted, so a retry after a restart matches."""
+        receipt = receipts.find(self.engine, task_id, f"reply:{route}:{key}")
+        return receipts.payload_of(receipt) if receipt else None
 
     def remember(self, route: str, task_id: str, key: str, response: dict) -> dict:
-        self.replies[(route, task_id, key)] = response
+        receipts.record(self.engine, task_id, f"reply:{route}:{key}", "reply", response)
         return response
+
+    def task_for_request_key(self, key: str) -> str | None:
+        """POST /api/requests idempotency: the task a key already created, or None."""
+        receipt = receipts.find_by_step(self.engine, f"request:{key}")
+        return receipt.task_id if receipt else None
+
+    def remember_request_key(self, key: str, task_id: str) -> None:
+        receipts.record(self.engine, task_id, f"request:{key}", "request", {"task_id": task_id})
+
+    def reset(self) -> int:
+        """Stop every running pipeline task and forget every wait: POST /api/demo/reset wipes the tables underneath."""
+        stopped = 0
+        for task in list(self._tasks.values()):
+            if not task.done():
+                task.cancel()
+                stopped += 1
+        self._tasks.clear()
+        for event in self._waits.values():
+            event.set()
+        self._waits.clear()
+        self._claimed.clear()
+        return stopped
 
     # ---- the ten steps -------------------------------------------------------------------------------------------
 
@@ -197,10 +234,16 @@ class Pipeline:
             raise PipelineFailure("CALL_FAILED", "No clinic call produced an offer.")
 
     def _voice_event(self, run: Run, event: dict) -> None:
-        """A `call_status`, `transcript` or `call_result` payload from the voice adapter: record the fact, then emit."""
+        """A `call_status`, `transcript` or `call_result` payload from the voice adapter: record the fact, then emit.
+
+        Transcript lines do not emit here: they take the live recorder (`_record_transcript`), so a mock call leaves
+        the same Turn rows and transcript events a real call does."""
         event = dict(event)
         type_ = event.pop("type")
         call_id = event.get("call_id")
+        if type_ == "transcript":
+            self._record_transcript(run, event)
+            return
         if type_ == "call_status":
             with session_scope(self.engine) as session:
                 call = session.get(Call, call_id)
@@ -214,6 +257,23 @@ class Pipeline:
                 if call is not None:
                     call.result_json = json.dumps({k: event[k] for k in ("price", "slot", "insured", "slotOk") if k in event})
         self._emit(run, type_, event, "contact")
+
+    def _record_transcript(self, run: Run, line: dict) -> None:
+        """One line of a mock or simulator call goes through `llm_proxy.record_turn`: the Turn row and the `transcript`
+        event are written together, keyed by (call_id, seq), so a replayed or retried line is a no-op (T8, invariant 7).
+
+        `seq` comes from the adapter when it numbers its lines (the simulator does); a line without one gets the next
+        number for its call, which is stable within the run. `simulated` is kept on the event exactly as the adapter
+        sent it, so a judge sees the same label on the transcript as on the call card."""
+        call_id = line["call_id"]
+        seq = line.get("seq")
+        if seq is None:
+            seq = run.transcript_seq.get(call_id, 0) + 1
+        run.transcript_seq[call_id] = max(int(seq), run.transcript_seq.get(call_id, 0))
+        spec = run.proxy_specs.get(call_id)
+        if spec is None:
+            spec = run.proxy_specs[call_id] = llm_proxy.load_spec(self.engine, call_id)
+        llm_proxy.record_turn(self.engine, self.bus, spec, int(seq), line["speaker"], line["text"], simulated=bool(line.get("simulated")))
 
     async def _ranking(self, run: Run) -> None:
         self._set_status(run, "ranking")
@@ -236,13 +296,18 @@ class Pipeline:
                                      "reasons": decision["reasons"], "second": decision["second"], "tradeoff": decision["tradeoff"]}, "contact")
 
     async def _await_approval(self, run: Run) -> bool:
+        """Step 6: the one user gate. SMS the pick, wait; after approval_timeout_s send one reminder, then wait as long as it takes (T6)."""
         self._set_status(run, "awaiting_approval")
         winner = run.winner
-        expires = self._now(run) + APPROVAL_WINDOW
+        expires = self._now(run) + timedelta(seconds=self.approval_timeout_s)
         self._emit(run, "approval_required", {"pick": {"clinic": winner.clinic, "slot": slot_label(winner.slot_start), "price": money(winner.price)},
                                               "expires_at": expires.isoformat()}, "contact")
         self._sms(run, run.owner.phone_e164, texts.approval_sms(winner.clinic, winner.slot_start, winner.price), "approval")
-        await self._wait(run.task_id)
+        if not await self._wait(run.task_id, timeout=self.approval_timeout_s):
+            self._sms(run, run.owner.phone_e164, texts.approval_reminder_sms(winner.clinic, winner.slot_start, winner.price), "approval_reminder")
+            self._emit(run, "task_updated", {"status": "awaiting_approval", "reason": "APPROVAL_TIMEOUT",
+                                             "message": "No answer yet; one reminder was sent. Still waiting for Approve or YES."}, "owner")
+            await self._wait(run.task_id)
         return self._status(run) == "awaiting_approval"  # a rejection moved it to cancelled
 
     def _booking(self, run: Run) -> None:
@@ -250,7 +315,12 @@ class Pipeline:
         winner = run.winner
         spec = run.specs[winner.call_id]
         slot = {"slot_start": winner.slot_start.isoformat(), "slot_end": winner.slot_end.isoformat()}
-        confirmation = self.deps.voice.confirm_booking(spec, slot)
+        confirmed, _ = receipts.once(
+            self.engine, run.task_id, "booking:confirm", "booking",
+            lambda: self.deps.voice.confirm_booking(spec, slot),
+            external_id=lambda c: c.confirmation_ref,
+        )
+        confirmation = Confirmation.model_validate(confirmed)
         if confirmation.status == "rejected":
             raise PipelineFailure("BOOKING_REJECTED", f"{winner.clinic} did not confirm the appointment: {confirmation.evidence}")
         address = spec.clinic.address
@@ -260,7 +330,12 @@ class Pipeline:
             booking_fields["address"] = address
         run.booking = Booking(**booking_fields)
         if confirmation.status == "confirmed":
-            receipt = self.deps.create_event(run.owner.id, run.booking, f"{run.task_id}:calendar")  # once, keyed by task
+            stored, _ = receipts.once(  # once per task: a retry finds the receipt and never inserts a second event
+                self.engine, run.task_id, "calendar", "calendar",
+                lambda: self.deps.create_event(run.owner.id, run.booking, f"{run.task_id}:calendar"),
+                external_id=lambda r: r.event_id,
+            )
+            receipt = CalendarReceipt.model_validate(stored)
             run.booking = run.booking.model_copy(update={"calendar_event_id": receipt.event_id})
             payload = {"calendar": texts.calendar_card(winner.slot_start, winner.slot_end, address),
                        "sms_user": texts.booked_sms(winner.clinic, winner.slot_start, winner.price, run.intake.insurance_carrier), "simulated": receipt.simulated}
@@ -291,11 +366,18 @@ class Pipeline:
             contact = next((c for c in contacts if c.scope == "ride_requests"), None)
             if contact is None:
                 raise PipelineFailure("CONTACT_DECLINED", "No emergency contact is on file to ask for a ride.")
-            name, phone = contact.name, contact.phone_e164
+            name, phone, relationship = contact.name, contact.phone_e164, contact.relationship
         spec = run.specs[run.winner.call_id]
-        message = texts.contact_request_message(run.owner.name.split()[0], run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
-        self._sms(run, phone, message, "contact_request")
-        self._emit(run, "contact_request", {"contact": name.split()[0], "message": message}, "contact")
+        first = run.owner.name.split()[0]
+        facts = local_intake.ContactFacts(first, name.split()[0], run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
+        template = texts.contact_request_message(first, run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
+        # Nano writes the scoped message on the device from the full record; the check falls back to the template (rule 4).
+        written = await asyncio.to_thread(
+            local_intake.contact_message, run.owner, run.intake, facts,
+            relationship=relationship, request_text=run.text, template=template, model=self.deps.intake_model(),
+        )
+        self._sms(run, phone, written.text, "contact_request")
+        self._emit(run, "contact_request", {"contact": name.split()[0], "message": written.text}, "contact")
         await self._wait(run.task_id)
         return self._status(run) == "awaiting_contact"
 
@@ -324,13 +406,21 @@ class Pipeline:
 
     # ---- plumbing -------------------------------------------------------------------------------------------------
 
-    async def _wait(self, task_id: str) -> None:
+    async def _wait(self, task_id: str, timeout: float | None = None) -> bool:
+        """Block until a POST or SMS releases this task. With a timeout, return False when nothing came in time and keep
+        the wait registered so the answer can still arrive; True means the wait was released and is now closed."""
         event = self._waits.setdefault(task_id, asyncio.Event())
-        try:
+        if timeout is None:
             await event.wait()
-        finally:
-            self._waits.pop(task_id, None)
-            self._claimed.discard(task_id)
+        else:
+            try:
+                await asyncio.wait_for(event.wait(), timeout)
+            except TimeoutError:
+                if not event.is_set():
+                    return False
+        self._waits.pop(task_id, None)
+        self._claimed.discard(task_id)
+        return True
 
     def _set_status(self, run: Run, status: str) -> None:
         with session_scope(self.engine) as session:
@@ -355,16 +445,27 @@ class Pipeline:
         emit(self.engine, self.bus, run.task_id, type_, payload, visibility)
 
     def _sms(self, run: Run, to: str, text: str, step: str):
-        """Send one text, keyed by task and step (the mock returns the same receipt for a repeat; live Twilio will too, #24).
+        return self.send_sms(run.task_id, to, text, step)
+
+    def send_sms(self, task_id: str, to: str, text: str, step: str):
+        """Send one text, keyed by task and step: the receipts table makes a repeat of the step return the first receipt (#24).
 
         Returns the MessageReceipt, or None when the adapter refused: that is reported to the owner as a
         `task_updated` with reason `SMS_NOT_SENT`, and the text is never shown as sent (status from receipts).
+        Public so the contact-reply handler (app/contact_replies.py) texts the owner through the same path.
         """
         try:
-            return self.deps.sms_send(to, text, f"{run.task_id}:{step}")
+            stored, _ = receipts.once(  # one text per (task, step); a repeat of the step returns the first receipt
+                self.engine, task_id, f"sms:{step}", "sms",
+                lambda: self.deps.sms_send(to, text, f"{task_id}:{step}"),
+                external_id=lambda r: r.message_id,
+            )
+            return MessageReceipt.model_validate(stored)
         except (RuntimeError, OSError, ValueError) as exc:  # the adapters raise plain, readable errors
-            log.warning("sms %s for task %s not sent: %s", step, run.task_id, exc)
-            self._emit(run, "task_updated", {"status": self._status(run), "reason": "SMS_NOT_SENT", "message": f"{step}: {exc}"}, "owner")
+            log.warning("sms %s for task %s not sent: %s", step, task_id, exc)
+            with Session(self.engine) as session:
+                status = session.get(Task, task_id).status
+            emit(self.engine, self.bus, task_id, "task_updated", {"status": status, "reason": "SMS_NOT_SENT", "message": f"{step}: {exc}"}, "owner")
             return None
 
     def _now(self, run: Run) -> datetime:

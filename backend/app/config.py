@@ -35,7 +35,13 @@ LIVE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
         "PUBLIC_BASE_URL",
         "DEMO_PHONE_ALLOWLIST",
     ),
-    "sms": ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER", "PUBLIC_BASE_URL", "DEMO_PHONE_ALLOWLIST"),
+    "sms": (
+        "TWILIO_ACCOUNT_SID",
+        "TWILIO_AUTH_TOKEN",
+        "TWILIO_PHONE_NUMBER",
+        "PUBLIC_BASE_URL",
+        "DEMO_PHONE_ALLOWLIST",
+    ),
     "calendar": ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"),
     "places": ("GOOGLE_MAPS_API_KEY",),
 }
@@ -54,6 +60,7 @@ class MissingSetting(Exception):
 class Settings(BaseModel):
     app_env: str = "development"
     app_timezone: str = "America/Chicago"
+    approval_timeout_min: float = 10.0  # one reminder SMS after this; then the task keeps waiting (T6)
     database_url: str = "sqlite:///./lifeline.db"
     public_base_url: str | None = None
     llm_proxy_secret: str | None = None
@@ -68,7 +75,9 @@ class Settings(BaseModel):
     elevenlabs_api_key: str | None = None
     elevenlabs_agent_id: str | None = None
     elevenlabs_phone_number_id: str | None = None
-    elevenlabs_webhook_secret: str | None = None  # HMAC secret shown once when the post-call webhook is created
+    elevenlabs_webhook_secret: str | None = (
+        None  # HMAC secret shown once when the post-call webhook is created
+    )
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
     twilio_phone_number: str | None = None
@@ -131,12 +140,17 @@ class Settings(BaseModel):
         if not self.is_development and not self.dashboard_session_secret:
             missing.append("DASHBOARD_SESSION_SECRET")
         if self.any_live:
-            missing += [name for name in MODEL_IDS.values() if not getattr(self, name.lower())]
+            missing += [
+                name for name in MODEL_IDS.values() if not getattr(self, name.lower())
+            ]
         for adapter, needed in LIVE_REQUIREMENTS.items():
             if self.modes[adapter] == "live":
                 missing += [name for name in needed if not getattr(self, name.lower())]
         if missing:
-            raise MissingSetting("startup needs values that are empty in .env: " + ", ".join(dict.fromkeys(missing)))
+            raise MissingSetting(
+                "startup needs values that are empty in .env: "
+                + ", ".join(dict.fromkeys(missing))
+            )
 
 
 def _env(name: str, env: dict[str, str]) -> str | None:
@@ -144,7 +158,9 @@ def _env(name: str, env: dict[str, str]) -> str | None:
     return value or None
 
 
-def load_settings(env_file: Path | None = ENV_FILE, environ: dict[str, str] | None = None) -> Settings:
+def load_settings(
+    env_file: Path | None = ENV_FILE, environ: dict[str, str] | None = None
+) -> Settings:
     """Build Settings from `environ` (default: os.environ after loading `env_file`). Empty strings count as unset."""
     if environ is None:
         if env_file is not None and env_file.exists():

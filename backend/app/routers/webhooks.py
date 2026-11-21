@@ -1,11 +1,20 @@
 """POST /api/webhooks/twilio/sms (signature, allowlist, YES or contact reply) and POST /api/webhooks/elevenlabs/post-call (transcript + data collection -> call_result).
 
-Only the ElevenLabs post-call handler is here (#21). Twilio SMS belongs to #22 and #23.
-Order of checks: signature (ElevenLabs-Signature, HMAC-SHA256 over "<t>.<raw body>", 30-minute window),
+Two webhooks: the ElevenLabs post-call handler (#21) and the Twilio SMS handler (#22).
+
+ElevenLabs order of checks: signature (ElevenLabs-Signature, HMAC-SHA256 over "<t>.<raw body>", 30-minute window),
 then the event type, then the call it belongs to (conversation_id -> calls.external_ref, falling back to the
-dynamic variable call_id), then the atomic per-call claim inside call_results. The synchronous work (Super, SQLite) runs on a worker thread so the event loop keeps serving the parallel calls
-and the SSE stream; the delivery is acknowledged with 200 only after the result is committed; a processing failure answers 500 so ElevenLabs retries, and the atomic claim makes
-that retry safe. (A pending-delivery table would let the handler answer faster; not needed at demo scale.)
+dynamic variable call_id), then the atomic per-call claim inside call_results. The synchronous work (Super, SQLite)
+runs on a worker thread so the event loop keeps serving the parallel calls and the SSE stream; the delivery is
+acknowledged with 200 only after the result is committed; a processing failure answers 500 so ElevenLabs retries,
+and the atomic claim makes that retry safe.
+
+Twilio: the SMS path trusts nothing
+until `integrations.sms_twilio.parse_inbound` has verified the sender (mock: fixture people on the allowlist;
+live: #27 adds the Twilio signature) and returns an InboundSms. An owner's YES approves the task that is
+waiting, NO cancels it; anything else, or any unverified sender, is ignored. Every inbound, applied or not, is
+answered 200 with an empty TwiML <Response/> (the documented no-action reply; a non-2xx makes Twilio retry) that
+says nothing about any task (T9). Every reply is keyed by MessageSid (T8).
 """
 
 from __future__ import annotations
@@ -17,17 +26,19 @@ import logging
 import time
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import Engine
-from sqlmodel import select
+from sqlmodel import Session, select
 
-from app import call_results
+from app import approvals, call_results, contact_replies
 from app.config import MissingSetting, Settings
 from app.db import session_scope
-from app.events import EventBus
+from app.events import EventBus, emit_many
 from app.models import Call, Task
 from app.nemotron.ranker import ChatJSON, NvidiaChatClient
+from app.people import load_owner
+from integrations import sms_twilio
 
 log = logging.getLogger("lifeline.webhooks")
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
@@ -166,3 +177,73 @@ async def elevenlabs_post_call(request: Request) -> dict:
         log.exception("post-call webhook processing failed; asking for a retry")
         raise HTTPException(500, "post-call processing failed; retry") from exc
     return {"ok": True, "accepted": payload["type"], **outcome}
+
+def _waiting_task(engine, owner_id: str, correlation: str | None) -> Task | None:
+    """The task this reply answers: the correlated one when the SMS names it, else the owner's task awaiting approval,
+    else the owner's latest task (so a repeated YES after approval is answered as already applied, not as a mystery)."""
+    with Session(engine) as session:
+        if correlation:
+            task = session.get(Task, correlation)
+            return task if task is not None and task.owner_id == owner_id else None
+        waiting = session.exec(
+            select(Task).where(Task.owner_id == owner_id, Task.status == "awaiting_approval").order_by(Task.created_at.desc())
+        ).first()
+        if waiting is not None:
+            return waiting
+        return session.exec(select(Task).where(Task.owner_id == owner_id).order_by(Task.created_at.desc(), Task.id.desc())).first()
+
+
+EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response/>'
+
+
+@router.post("/twilio/sms", response_class=Response)
+async def twilio_sms(request: Request) -> Response:
+    """Always 200 with empty TwiML, the documented no-action reply, for every inbound: applied, ignored or duplicate.
+    (A trial account logs error 12300 "Direct TwiML XML is not supported" on this reply; the message is still received.)
+    The outcome goes to the log and to `handle_inbound` for tests; the task state is the record."""
+    outcome = handle_inbound(request.app, await request.form())
+    log.info("inbound SMS outcome: %s", {k: v for k, v in outcome.items() if k != "task_id"})
+    return Response(content=EMPTY_TWIML, media_type="text/xml")
+
+
+def handle_inbound(app, form) -> dict:
+    """Verify the sender, read the answer, apply it once. Returns what happened (for the log and tests), never raises for
+    bad input: an unverified sender or a malformed form is simply ignored."""
+    try:
+        inbound = sms_twilio.parse_inbound(form)
+    except RuntimeError as exc:
+        # UNVERIFIED_SENDER or a malformed form: say nothing about any task.
+        log.warning("inbound SMS ignored: %s", str(exc).split(":")[0])
+        return {"ok": False, "ignored": "unverified_sender"}
+    if inbound.role != "owner":
+        # The contact's answer to the ride request (#23): yes confirms once, no keeps waiting and tells the owner.
+        outcome = contact_replies.handle_contact_sms(app.state.engine, app.state.bus, app.state.pipeline, inbound.from_e164, inbound.body, inbound.message_id)
+        return {"ok": True, "role": "contact", **outcome}
+    decision = approvals.decision_from_text(inbound.body)
+    if decision is None:
+        return {"ok": True, "ignored": "not_an_answer"}
+    engine, bus, pipeline = app.state.engine, app.state.bus, app.state.pipeline
+    owner_id = _owner_id_for(inbound.from_e164)
+    if owner_id is None:
+        return {"ok": False, "ignored": "unverified_sender"}
+    task = _waiting_task(engine, owner_id, inbound.correlation)
+    if task is None:
+        log.info("owner SMS %s but no task of theirs is awaiting approval", decision)
+        return {"ok": True, "ignored": "nothing_waiting"}
+    try:
+        reply = approvals.apply_decision(engine, bus, pipeline, task.id, owner_id, decision, "sms", inbound.message_id, emit=emit_many)
+    except approvals.WrongState as exc:
+        return {"ok": True, "ignored": "not_awaiting_approval", "status": exc.status}
+    return {"ok": True, "task_id": task.id, **reply}
+
+
+def _owner_id_for(phone_e164: str) -> str | None:
+    """The owner whose on-device record carries this verified number. One owner in the demo; the lookup stays explicit."""
+    from app.people import (
+        _users,  # the fixture people, the same source parse_inbound verified against
+    )
+
+    owner = _users()["owner"]
+    if owner.get("phone_e164") == phone_e164:
+        return load_owner(owner["id"]).id
+    return None

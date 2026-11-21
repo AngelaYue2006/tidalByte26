@@ -49,7 +49,7 @@ Deterministic, in this order. Each step writes an event; the task status is the 
 1. `intake` — Nano → `IntakeRequest`. Emit `request`.
 2. `calendar` — `calendar.free_windows()` for the requested range.
 3. `places` — `places.find_clinics()` top 3, then `distance.drive()` from the owner's home. Emit `call_start` ×3 with distance meta.
-4. `calling` — `voice.start_call()` ×3 in parallel. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`.
+4. `calling` — `voice.start_call()` ×3 in parallel. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`. Mock and simulator lines take the same recorder (`llm_proxy.record_turn`, one `turns` row and one `transcript` event per `(call_id, seq)`), labelled `simulated: true`.
 5. `ranking` — `ranking.hard_rules()` drops offers over budget, outside free windows, or not insured. `ranker.rank()` (Super) scores the rest. Emit `decision`. If nothing survives, status `failed` with reason, emit `task_updated`, notify both, stop.
 6. `awaiting_approval` — SMS the owner the pick. Emit `approval_required`. Wait for `POST /api/tasks/{id}/approve` or SMS `YES`. Timeout: one reminder, then stay waiting.
 7. `booking` — `voice.confirm_booking()` (a short call-back, or the mock) returns `Confirmation`. Only on `confirmed`: `calendar.create_event()` once, keyed by task id. Emit `booked`. On `tentative`: emit `booked` with `tentative: true` and no calendar event.
@@ -64,10 +64,13 @@ Deterministic, in this order. Each step writes an event; the task status is the 
 `calls`: `{id, task_id, clinic_name, clinic_phone, distance_mi, status, result_json, external_ref, started_at, ended_at}` — `external_ref` is the ElevenLabs conversation id.
 `turns`: `{id, call_id, seq, speaker, text, at}` — speaker is `agent` or `clinic`. Text only.
 `events`: `{id, task_id, type, payload_json, visibility, at}` — visibility `owner`, `contact` or `internal`.
+`receipts`: `{id, task_id, step, kind, external_id, payload_json, at}` — unique on `(task_id, step)`. One row per external side effect (`sms:<step>`, `booking:confirm`, `calendar`; `external_id` is the message id, confirmation ref or calendar event id) and per idempotent reply (`reply:<route>:<key>` for approve and contact offers, `request:<key>` for `POST /api/requests`). `payload_json` is what the effect returned and is replayed to a retry.
 
 Task statuses: `intake`, `calendar`, `places`, `calling`, `ranking`, `awaiting_approval`, `booking`, `transport`, `awaiting_contact`, `completed`, `failed`, `cancelled`.
 
-Every external side effect (SMS, booking, calendar insert) is keyed by `task_id` plus step name and is skipped if a receipt already exists.
+Every external side effect (SMS, booking, calendar insert) is keyed by `task_id` plus step name and is skipped if a receipt already exists (`app/receipts.py`, `once()`): the row is written right after the effect succeeds, a failed effect leaves none, and two concurrent attempts race on the unique index so one receipt survives and both callers get it. Receipts persist across restarts, so a retried `POST` after a restart gets the same reply.
+
+`POST /api/demo/reset` (development only) cancels every running pipeline, wipes all six tables, reseeds the contacts from `backend/fixtures/users.json` and two finished runs from `backend/fixtures/past_runs.json` for the history page, then tells every open `GET /api/live` stream to start over with a fresh `snapshot` (event ids restart after a wipe, so a cursor from before the reset is meaningless).
 
 ## REST interface (v1)
 
@@ -84,7 +87,7 @@ Every external side effect (SMS, booking, calendar insert) is keyed by `task_id`
 | `POST` | `/v1/chat/completions` | OpenAI chat format from ElevenLabs | custom LLM proxy to Lightning; streams; logs turns |
 | `POST` | `/api/webhooks/elevenlabs/post-call` | ElevenLabs payload | transcript + data collection → `call_result` |
 | `POST` | `/api/webhooks/twilio/sms` | Twilio form | signature check, allowlist, match `YES` or contact reply to the open task |
-| `POST` | `/api/demo/reset` | — | `APP_ENV=development` only; clears and reseeds |
+| `POST` | `/api/demo/reset` | — | `APP_ENV=development` only (403 otherwise); stops pipelines, clears every table, reseeds contacts and two past runs; returns `{stopped, cleared, seeded}` |
 | `GET` | `/api/health` | — | adapter modes and versions, no secrets |
 
 Auth for the hackathon: one shared dashboard session cookie, `viewer_id` chosen on a role picker. Not production identity. `GET /api/session` issues `lifeline_session`, an HMAC-signed token under `DASHBOARD_SESSION_SECRET` (HttpOnly, SameSite=Lax); `GET /api/live` and `GET /api/tasks/{id}/events` answer 401 without a valid one. In development with no secret set the app signs with a random per-process secret.
@@ -97,7 +100,7 @@ The prototype `frontend/prototype/index.html` renders the first eight exactly as
 { type: "request", text, chips: [..] }                       // chip starting with "!" renders green
 { type: "call_start", call_id, clinic, meta }                // meta: "1.2 mi · 6 min"
 { type: "call_status", call_id, status: "dialing"|"live"|"hold"|"done" }
-{ type: "transcript", call_id, speaker: "agent"|"clinic", text }
+{ type: "transcript", call_id, seq, speaker: "agent"|"clinic", text }   // seq: 1-based position in the call; mock lines carry simulated: true
 { type: "call_result", call_id, price, slot, insured, slotOk }
 { type: "decision", winner, title, reasons: [..], second: [..], tradeoff }
 { type: "booked", calendar, sms_user, tentative? }
@@ -122,7 +125,7 @@ SSE details: `id:` is the events-table id and increases per owner; the `snapshot
 ```python
 # nemotron (backend/app/nemotron/)
 local_intake.redact(utterance: str, user: UserRecord) -> IntakeRequest
-local_intake.contact_message(task: Task, contact: Contact) -> str
+local_intake.contact_message(owner: UserRecord, intake: IntakeRequest, facts: ContactFacts, *, relationship, request_text, template, model) -> ContactMessage  # on device; text checked, template fallback
 ranker.rank(offers: list[Offer], windows: list[Window], priority: str) -> Decision
 
 # integrations/
