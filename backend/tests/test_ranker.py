@@ -220,3 +220,47 @@ def test_nvidia_client_never_guesses_a_model_id(monkeypatch):
     assert str(client._client.base_url).startswith(ranker.NVIDIA_BASE_URL)
     assert "nvidia/" not in RANKING_SYSTEM  # no model ID anywhere in the prompt or module defaults
     assert "ranking_user_message" in ranker.__dict__ or ranking_user_message
+
+
+# --- #92: Super 3.5 thinks by default and returns empty content ---------------------------------------------------
+
+
+def _reply(content, finish_reason="stop"):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content), finish_reason=finish_reason)])
+
+
+def test_super_client_asks_for_json_with_thinking_off(monkeypatch):
+    """With thinking on, Super spends the whole budget in reasoning_content and `content` is empty (#92)."""
+    from app.nemotron.call_agent import NO_THINK_EXTRA_BODY
+
+    client = NvidiaChatClient(api_key="k", model_id="nvidia/some-super")
+    seen = {}
+
+    def fake_create(**kwargs):
+        seen.update(kwargs)
+        return _reply('{"winner_call_id": "a"}')
+
+    monkeypatch.setattr(client._client.chat.completions, "create", fake_create)
+    assert client.complete_json("sys", "user") == '{"winner_call_id": "a"}'
+    assert seen["extra_body"] == NO_THINK_EXTRA_BODY == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert seen["response_format"] == {"type": "json_object"} and seen["model"] == "nvidia/some-super"
+    assert [m["role"] for m in seen["messages"]] == ["system", "user"]
+
+
+def test_super_client_names_an_empty_reply_instead_of_returning_it(monkeypatch):
+    client = NvidiaChatClient(api_key="k", model_id="nvidia/some-super")
+    monkeypatch.setattr(client._client.chat.completions, "create", lambda **kw: _reply("", finish_reason="length"))
+    with pytest.raises(ranker.BadReply, match="empty reply .*length"):
+        client.complete_json("sys", "user")
+    monkeypatch.setattr(client._client.chat.completions, "create", lambda **kw: _reply(None))
+    with pytest.raises(ranker.BadReply, match="empty reply"):
+        client.complete_json("sys", "user")
+
+
+def test_parse_json_object_names_an_empty_string():
+    with pytest.raises(ranker.BadReply, match="empty reply"):
+        parse_json_object("   ")
+    with pytest.raises(ranker.BadReply, match="empty reply"):
+        parse_json_object("```json\n```")
