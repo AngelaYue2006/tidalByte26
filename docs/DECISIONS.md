@@ -65,6 +65,12 @@
 |---|---|---|---|
 | D15 | Transcript visibility | `transcript` events stay visible to both roles (`visibility: contact`), as the Live events visibility rule and D6 say. The agent never utters a dropped field (T2 guards the redaction), so a receptionist has nothing sensitive to echo. As a belt-and-braces measure the contact projection (`app/events.py`, `screen_for_contact`) replaces identifier-shaped values in clinic lines (member IDs, phone numbers, dates of birth, street addresses) with `[removed]` using the on-device detector `intake_backstop.identifier_values`; the owner sees the line as spoken. | Keeps D6 (the contact sees the call cards) and product rule 4 (the contact gets their scope) without a second visibility class. Dropping clinic lines for the contact would reopen D6 and needs its own PR that edits this row. |
 
+## D16 — SMS for the demo (decided 2026-11-21, #22)
+
+| # | Topic | Decision | Why |
+|---|---|---|---|
+| D16 | SMS | **Outbound SMS is mock for the demo; inbound YES is live.** The Twilio trial stays. `SMS_MODE=mock` writes every outbound text (the approval pick, the T6 reminder, the booked and final texts, the contact request) to the dashboard with `simulated: true`; the approval path and the inbound webhook (`POST /api/webhooks/twilio/sms`, allowlist, YES/NO) stay real. Optionally one of Twilio's predefined templates may be sent as the approval nudge if Joyce picks one (builder 1 is listing them). | The new-style trial sends only predefined templates (error 572006), and upgrading alone does not unlock custom text: unregistered 10DLC US traffic is carrier-blocked (error 30034) and A2P registration takes days. Inbound through the trial webhook works today (#7), so the one user gate can still be answered by text. D15 is numbered in PR #58; this entry takes D16 so the two PRs do not collide. |
+
 ## Defaults taken while building (#23)
 
 - **Nano writes the contact message from the full on-device record, and code checks it.** `local_intake.contact_message` gives Nano the owner record, the redacted intake, the spoken request and the appointment facts (all local), and accepts the text only if it carries the clinic, the time, the street address and a YES/NO instruction and none of: the owner's other identifiers, the carrier, money, identifier shapes, sensitive terms. Otherwise, or when Ollama is down, the templated `texts.contact_request_message` is sent. The `contact_message` metrics row records which (`source`) and why (`violations`, kinds only).
@@ -72,4 +78,3 @@
 - **An unknown sender's text is attached to the one waiting task.** When the sender is not a contact on file and exactly one task is `awaiting_contact`, the owner gets `task_updated {reason: UNVERIFIED_SENDER}` with no number and no text; with zero or several waiting tasks it is only logged (T9).
 - **A contact text that is neither yes nor no changes nothing.** Logged with its length; the contact can text again or use the dashboard. "No" wins when both words appear, so no false ride is confirmed.
 - **Inbound SMS replies reach the pipeline through `app.contact_replies.handle_contact_sms`.** The signed webhook (#22 in PR #80, signature from #27) calls it after its own signature, allowlist and `MessageSid` checks; it does not parse Twilio forms itself.
-

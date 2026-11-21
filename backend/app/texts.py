@@ -53,6 +53,10 @@ def approval_sms(clinic: str, start: datetime, price: float) -> str:
     return f"LifeLine: Best option is {clinic}, {slot_label(start)} for {money(price)}. Reply YES to book, or tap Approve."
 
 
+def approval_reminder_sms(clinic: str, start: datetime, price: float) -> str:
+    return f"LifeLine reminder: {clinic}, {slot_label(start)} for {money(price)} is still open. Reply YES to book or NO to cancel."
+
+
 def contact_request_message(owner_first_name: str, care_type: str, clinic: str, start: datetime, address: str) -> str:
     return (
         f"LifeLine: {owner_first_name} has a {care_type} at {clinic}, {day_and_time(start)}, {address}. "
