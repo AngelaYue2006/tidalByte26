@@ -15,7 +15,7 @@ from app.db import init_db, make_engine
 from app.events import EventBus
 from app.nemotron import local_intake
 from app.orchestrator import Pipeline
-from app.routers import approvals, contacts, demo, live, requests, tasks
+from app.routers import approvals, contacts, demo, live, requests, tasks, webhooks
 
 VERSION = "0.1.0"
 
@@ -49,6 +49,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     app.include_router(requests.router)
     app.include_router(approvals.router)
     app.include_router(contacts.router)
+    app.include_router(webhooks.router)
     return app
 
 
