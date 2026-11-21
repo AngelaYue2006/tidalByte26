@@ -68,7 +68,7 @@ def test_terminal_statuses_go_nowhere(terminal):
         ("calling", "calling"),            # no self-loop
     ],
 )
-def test_illegal_moves_raise_and_leave_the_task_untouched(frm, to):
+def test_illegal_moves_raise_and_leave_status_unchanged(frm, to):
     task = FakeTask(status=frm)
     with pytest.raises(IllegalTransition, match=f"from '{frm}' to '{to}'"):
         transition(task, to)

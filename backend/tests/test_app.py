@@ -7,7 +7,7 @@ from app.models import TABLES
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect
 
-SECRET = "sk_do_not_leak_me_1234567890"
+SECRET = "leak-canary-1234567890"
 ENV = {
     "APP_ENV": "development",
     "DATABASE_URL": "sqlite://",
