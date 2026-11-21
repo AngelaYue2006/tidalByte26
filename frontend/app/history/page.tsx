@@ -1,2 +1,11 @@
-// History: past tasks from GET /api/tasks with outcome, pick, ride status and event trail.
-export default function HistoryPage() { return <main>History</main>; }
+// History placeholder. Full trail from GET /api/tasks lands in a later issue.
+import { Suspense } from "react";
+import HistoryPlaceholder from "@/components/HistoryPlaceholder";
+
+export default function HistoryPage() {
+  return (
+    <Suspense fallback={<main className="card"><p className="muted">Loading…</p></main>}>
+      <HistoryPlaceholder />
+    </Suspense>
+  );
+}
