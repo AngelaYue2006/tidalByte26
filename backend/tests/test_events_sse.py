@@ -200,14 +200,16 @@ def test_events_endpoint_matches_the_stream_filter_and_scopes_by_viewer(client):
 
 def test_snapshot_for_a_viewer_with_no_task(client):
     with client.stream("GET", "/api/live?viewer_id=nobody") as resp:
-        snap_id, snap = next(sse_messages(resp.iter_lines()))
+        messages = sse_messages(resp.iter_lines())  # held: dropping the iterator closes the stream under httpx2
+        snap_id, snap = next(messages)
     assert snap == {"type": "snapshot", "task": None, "calls": [], "events": []} and snap_id is None
 
 
 def test_subscriptions_are_released_on_disconnect(client):
     bus = client.app.state.bus
     with client.stream("GET", "/api/live?viewer_id=mary") as resp:
-        next(sse_messages(resp.iter_lines()))
+        messages = sse_messages(resp.iter_lines())  # held: dropping the iterator closes the stream under httpx2
+        next(messages)
         assert bus.subscriber_count == 1
     deadline = time.time() + 2
     while bus.subscriber_count and time.time() < deadline:
