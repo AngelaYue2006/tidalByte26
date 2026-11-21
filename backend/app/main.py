@@ -12,7 +12,7 @@ from app import session
 from app.config import Settings, load_settings
 from app.db import init_db, make_engine
 from app.events import EventBus
-from app.routers import demo, live, tasks
+from app.routers import demo, live, tasks, twilio_sms
 
 VERSION = "0.1.0"
 
@@ -36,10 +36,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Development without a configured secret gets a per-process one; validate_startup requires it elsewhere.
     app.state.session_secret = settings.dashboard_session_secret or secrets.token_hex(32)
     app.state.heartbeat_seconds = live.HEARTBEAT_SECONDS
+    app.state.inbound_sms_seen = set()  # MessageSids already answered; the stub's idempotency key
     app.include_router(demo.router)
     app.include_router(session.router)
     app.include_router(live.router)
     app.include_router(tasks.router)
+    app.include_router(twilio_sms.router)
     return app
 
 

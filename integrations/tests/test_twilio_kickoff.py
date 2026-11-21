@@ -1,4 +1,4 @@
-﻿"""Read-only kickoff checks use synthetic fixtures; no network or messages."""
+"""Read-only kickoff checks use synthetic fixtures; no network or messages."""
 
 import unittest
 
@@ -20,9 +20,9 @@ class TwilioKickoffTests(unittest.TestCase):
                 "outgoing_caller_ids": [{"phone_number": p} for p in self.phones]
             },
             "/IncomingPhoneNumbers.json?PageSize=1000": {
-                "incoming_phone_numbers": [{
-                    "phone_number": "+15555550100", "capabilities": {"sms": True}
-                }]
+                "incoming_phone_numbers": [
+                    {"phone_number": "+15555550100", "capabilities": {"sms": True}}
+                ]
             },
         }
 
@@ -35,15 +35,23 @@ class TwilioKickoffTests(unittest.TestCase):
 
     def test_bad_allowlist_is_not_ready(self):
         self.values["DEMO_PHONE_ALLOWLIST"] = "placeholder"
-        self.assertFalse(check(self.values, self.responses.__getitem__)["phone_setup_ready"])
+        self.assertFalse(
+            check(self.values, self.responses.__getitem__)["phone_setup_ready"]
+        )
 
     def test_unverified_recipient_is_not_ready(self):
-        self.responses["/OutgoingCallerIds.json?PageSize=1000"]["outgoing_caller_ids"].pop()
-        self.assertFalse(check(self.values, self.responses.__getitem__)["phone_setup_ready"])
+        self.responses["/OutgoingCallerIds.json?PageSize=1000"][
+            "outgoing_caller_ids"
+        ].pop()
+        self.assertFalse(
+            check(self.values, self.responses.__getitem__)["phone_setup_ready"]
+        )
 
     def test_unowned_sender_is_not_ready(self):
         self.values["TWILIO_PHONE_NUMBER"] = "+15555550199"
-        self.assertFalse(check(self.values, self.responses.__getitem__)["phone_setup_ready"])
+        self.assertFalse(
+            check(self.values, self.responses.__getitem__)["phone_setup_ready"]
+        )
 
     def test_invalid_credentials_do_not_call_api(self):
         self.values["TWILIO_ACCOUNT_SID"] = "placeholder"

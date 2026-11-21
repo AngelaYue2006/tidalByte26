@@ -1,4 +1,4 @@
-﻿"""Read-only Twilio kickoff checks; never print secrets or phone numbers.
+"""Read-only Twilio kickoff checks; never print secrets or phone numbers.
 
 Run from the repository root:
 python -m integrations.twilio_kickoff --env-file ../lifeline-6/.env
@@ -121,7 +121,7 @@ def main():
         print("Twilio API HTTP status:", error.code)
     except CheckFailed as error:
         print(str(error))
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - anything else may carry private values
         # URLs, exception bodies and account responses can contain private values.
         print("Setup check failed:", type(error).__name__)
     return 1
