@@ -43,11 +43,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     """Build the app. Settings come from .env unless a test passes them in. Startup fails loudly on a missing live value."""
     settings = settings or load_settings()
     settings.validate_startup()
-    if not logging.getLogger().handlers:
-        # uvicorn configures only its own loggers; without this, app INFO lines (events, webhooks) vanish.
-        logging.basicConfig(
-            level=logging.INFO, format="%(levelname)s:     %(name)s %(message)s"
-        )
+    configure_logging()
     engine = make_engine(settings.database_url)
 
     @asynccontextmanager
