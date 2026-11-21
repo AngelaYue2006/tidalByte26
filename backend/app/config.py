@@ -30,6 +30,7 @@ LIVE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
         "ELEVENLABS_API_KEY",
         "ELEVENLABS_AGENT_ID",
         "ELEVENLABS_PHONE_NUMBER_ID",
+        "ELEVENLABS_WEBHOOK_SECRET",
         "LLM_PROXY_SECRET",
         "PUBLIC_BASE_URL",
         "DEMO_PHONE_ALLOWLIST",
@@ -68,6 +69,7 @@ class Settings(BaseModel):
     elevenlabs_api_key: str | None = None
     elevenlabs_agent_id: str | None = None
     elevenlabs_phone_number_id: str | None = None
+    elevenlabs_webhook_secret: str | None = None  # HMAC secret shown once when the post-call webhook is created
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
     twilio_phone_number: str | None = None

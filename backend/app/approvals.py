@@ -26,6 +26,8 @@ REJECT_WORDS = frozenset({"no", "n", "no.", "reject", "cancel", "stop", "don't",
 ALREADY_APPROVED = ("awaiting_approval", "booking", "transport", "awaiting_contact", "completed")
 
 
+REPLY_ROUTE = "approve"  # the receipt route for an owner's answer, whichever channel carried it (receipts: reply:approve:<key>)
+
 class NotFound(LookupError):
     pass
 
@@ -65,7 +67,7 @@ def apply_decision(
         if task.owner_id != actor_id:
             raise NotOwner(actor_id)
         status = task.status
-    replayed = pipeline.replay(via, task_id, key)
+    replayed = pipeline.replay(REPLY_ROUTE, task_id, key)  # one reply namespace for both channels; `via` goes in the event
     if replayed is not None:
         return replayed  # the same key again: the same answer, nothing re-applied
     if status != "awaiting_approval" or not pipeline.claim_wait(task_id):
@@ -86,4 +88,4 @@ def apply_decision(
         pipeline.release_wait(task_id)
         raise
     pipeline.resume(task_id)
-    return pipeline.remember(via, task_id, key, {"status": "approved" if decision == "approve" else "cancelled", "applied": True})
+    return pipeline.remember(REPLY_ROUTE, task_id, key, {"status": "approved" if decision == "approve" else "cancelled", "applied": True})

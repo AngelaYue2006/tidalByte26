@@ -59,6 +59,12 @@
 - `call_result.price` and `call_result.slot` are display strings (`"$95"`, `"Thu 9:30"`), as the prototype renders them. The numeric price and ISO slot live in `Offer` and the task `booking`; the dashboard never computes from the event. Default taken in `shared/events.schema.json`.
 - `IntakeRequest.time_range` is `{start, end}` as ISO date-times in the owner's timezone, resolved on device from phrases like "this week". Default taken in `shared/intake_request.schema.json`.
 
+## D15 — Clinic speech on the contact's dashboard (decided 2026-11-21, #20)
+
+| # | Topic | Decision | Why |
+|---|---|---|---|
+| D15 | Transcript visibility | `transcript` events stay visible to both roles (`visibility: contact`), as the Live events visibility rule and D6 say. The agent never utters a dropped field (T2 guards the redaction), so a receptionist has nothing sensitive to echo. As a belt-and-braces measure the contact projection (`app/events.py`, `screen_for_contact`) replaces identifier-shaped values in clinic lines (member IDs, phone numbers, dates of birth, street addresses) with `[removed]` using the on-device detector `intake_backstop.identifier_values`; the owner sees the line as spoken. | Keeps D6 (the contact sees the call cards) and product rule 4 (the contact gets their scope) without a second visibility class. Dropping clinic lines for the contact would reopen D6 and needs its own PR that edits this row. |
+
 ## D16 — SMS for the demo (decided 2026-11-21, #22)
 
 | # | Topic | Decision | Why |

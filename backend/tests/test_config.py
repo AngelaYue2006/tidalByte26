@@ -30,7 +30,7 @@ def test_allowlist_is_parsed_from_comma_separated_e164():
 
 MODEL_ENV = {"NEMOTRON_NANO_TAG": "nano:4bit", "NEMOTRON_LIGHTNING_ID": "nvidia/lightning", "NEMOTRON_SUPER_ID": "nvidia/super"}
 LIVE_VOICE = {**ALL_MOCK, **MODEL_ENV, "VOICE_MODE": "live", "NVIDIA_API_KEY": "x", "ELEVENLABS_API_KEY": "x",
-              "ELEVENLABS_AGENT_ID": "x", "ELEVENLABS_PHONE_NUMBER_ID": "x", "LLM_PROXY_SECRET": "x",
+              "ELEVENLABS_AGENT_ID": "x", "ELEVENLABS_PHONE_NUMBER_ID": "x", "ELEVENLABS_WEBHOOK_SECRET": "x", "LLM_PROXY_SECRET": "x",
               "PUBLIC_BASE_URL": "https://example.ngrok.app", "DEMO_PHONE_ALLOWLIST": "+15550100001"}
 
 
