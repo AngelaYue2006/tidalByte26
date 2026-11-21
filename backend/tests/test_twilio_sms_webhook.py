@@ -4,7 +4,7 @@ import logging
 
 import pytest
 from app.config import load_settings
-from app.main import configure_logging, create_app
+from app.main import create_app
 from app.routers.twilio_sms import record_inbound
 from fastapi.testclient import TestClient
 
@@ -15,6 +15,7 @@ ENV = {
     "APP_ENV": "development",
     "DATABASE_URL": "sqlite://",
     "DEMO_PHONE_ALLOWLIST": f"{OWNER},+15550100002",
+    "TWILIO_KICKOFF_STUB": "1",
 }
 
 
@@ -22,6 +23,27 @@ ENV = {
 def client():
     with TestClient(create_app(load_settings(env_file=None, environ=ENV))) as c:
         yield c
+
+
+def test_stub_is_not_mounted_unless_the_kickoff_setting_is_on():
+    """The stub has no signature check, so the normal app (no TWILIO_KICKOFF_STUB) must not serve it."""
+    env = {k: v for k, v in ENV.items() if k != "TWILIO_KICKOFF_STUB"}
+    with TestClient(create_app(load_settings(env_file=None, environ=env))) as c:
+        assert c.post(
+            "/api/webhooks/twilio/sms",
+            data={"MessageSid": "SM0", "From": OWNER, "Body": "YES"},
+        ).status_code in (404, 405, 422), (
+            "the stub must not answer; the real route (#80, #27) owns this path"
+        )
+    with TestClient(
+        create_app(
+            load_settings(env_file=None, environ={**env, "TWILIO_KICKOFF_STUB": "0"})
+        )
+    ) as c:
+        assert c.post(
+            "/api/webhooks/twilio/sms",
+            data={"MessageSid": "SM0", "From": OWNER, "Body": "YES"},
+        ).status_code in (404, 405, 422)
 
 
 def post(client, **fields):
@@ -90,7 +112,9 @@ def test_app_loggers_reach_a_handler_under_a_bare_server():
     root.handlers[:] = []
     root.setLevel(logging.WARNING)
     try:
-        configure_logging()
+        create_app(
+            load_settings(env_file=None, environ=ENV)
+        )  # the factory path, as uvicorn takes it
         assert root.handlers
         assert logging.getLogger("lifeline.sms").getEffectiveLevel() <= logging.INFO
     finally:

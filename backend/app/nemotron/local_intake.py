@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from datetime import datetime
 from typing import Protocol
@@ -22,6 +23,10 @@ from app.nemotron.types import DROPPABLE_FIELDS, IntakeRequest, TimeRange, UserR
 log = logging.getLogger(__name__)
 
 INTAKE_INCOMPLETE = "INTAKE_INCOMPLETE"
+# Measured on the demo laptop (#52): 2.1 s warm with thinking off, 9.5 s with it on, 10.4 s while the model loads.
+# Every request turns thinking off and asks Ollama to keep the model resident for the whole demo.
+THINK = False
+KEEP_ALIVE = "30m"
 
 
 class IntakeError(Exception):
@@ -66,6 +71,8 @@ class OllamaClient:
             "model": self.name,
             "stream": False,
             "format": schema,
+            "think": THINK,
+            "keep_alive": KEEP_ALIVE,
             "options": {"temperature": 0},
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
@@ -83,9 +90,38 @@ class OllamaClient:
             raise IntakeError("Ollama returned something that is not JSON") from exc
 
 
+    def warm_up(self) -> bool:
+        """Load the model now so the first real intake is not the 10 s one. An empty generate makes Ollama load the
+        model and keep it for KEEP_ALIVE. Never raises: no Ollama means no warm-up, not a failed startup."""
+        try:
+            response = self._http.post("/api/generate", json={"model": self.name, "think": THINK, "keep_alive": KEEP_ALIVE})
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            log.warning("intake warm-up skipped: Ollama at %s said %s", self.base_url, exc.__class__.__name__)
+            return False
+        log.info("intake model %s loaded and kept for %s", self.name, KEEP_ALIVE)
+        return True
+
+
 def from_env() -> OllamaClient:
     """Read OLLAMA_BASE_URL and NEMOTRON_NANO_TAG. No model tag is invented."""
     return OllamaClient(os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"), os.environ.get("NEMOTRON_NANO_TAG"))
+
+
+def warm_up_in_background(base_url: str, model_tag: str | None, timeout_s: float = 120.0) -> threading.Thread | None:
+    """Start the warm-up on a daemon thread at app startup. Returns the thread, or None when there is no tag to load.
+    Startup never waits on it and never fails because of it."""
+    if not model_tag:
+        log.info("intake warm-up skipped: NEMOTRON_NANO_TAG is not set")
+        return None
+    try:
+        client = OllamaClient(base_url, model_tag, timeout_s=timeout_s)
+    except IntakeError as exc:
+        log.warning("intake warm-up skipped: %s", exc)
+        return None
+    thread = threading.Thread(target=client.warm_up, name="nano-warm-up", daemon=True)
+    thread.start()
+    return thread
 
 
 def redact(utterance: str, user: UserRecord, *, model: IntakeModel | None = None, now: datetime | None = None) -> IntakeRequest:
