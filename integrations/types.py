@@ -29,7 +29,7 @@ class IntakeRequest(Fact):
     insurance_carrier: str | None = None
     time_range: Window
     needs_ride: bool
-    search_area: Nonempty
+    search_area: str | None
     dropped_fields: list[str] = Field(default_factory=list)
 
 
@@ -115,6 +115,7 @@ class MessageReceipt(Fact):
         """Payload for the orchestrator to publish with the correct task scope."""
         field = "sms_user" if role == "owner" else "sms_contact"
         event = {"type": "notified", "simulated": self.simulated, field: self.text}
+        # The notified schema requires sms_contact; the orchestrator composes final texts.
         if role == "owner":
             event["sms_contact"] = ""
         return event

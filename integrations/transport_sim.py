@@ -10,8 +10,8 @@ from integrations.types import Booking, TransportOptions
 def check(booking: Booking, needs: dict) -> TransportOptions:
     if os.getenv("TRANSPORT_MODE", "fixture") != "fixture":
         raise RuntimeError("Transport only supports TRANSPORT_MODE=fixture")
-    if booking.status != "confirmed":
-        raise RuntimeError("Transport check requires a confirmed booking")
+    if booking.status == "rejected":
+        raise RuntimeError("Transport check cannot use a rejected booking")
     path = Path(__file__).resolve().parent / "fixtures" / "transport.json"
     data = json.loads(path.read_text(encoding="utf-8-sig"))
     if data != {

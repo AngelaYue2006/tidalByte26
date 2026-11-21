@@ -17,9 +17,11 @@ from integrations.fixtures import read_fixture
 from integrations.types import (
     Booking,
     CalendarReceipt,
+    CallSpec,
     Clinic,
     Distance,
     InboundSms,
+    IntakeRequest,
     MessageReceipt,
     TransportOptions,
     Window,
@@ -217,3 +219,40 @@ def test_time_models_reject_naive_or_reversed_ranges():
         Window(start="2026-11-24T13:00:00", end="2026-11-24T17:00:00")
     with pytest.raises(ValidationError):
         Window(start="2026-11-24T17:00:00Z", end="2026-11-24T13:00:00Z")
+
+
+def test_transport_accepts_tentative_booking(booking):
+    booking.status = "tentative"
+    assert (
+        transport.check(booking, {"accessible": True}).reason
+        == "UNAVAILABLE_ACCESSIBLE_RIDE"
+    )
+    with pytest.raises(RuntimeError, match="confirmed"):
+        calendar.create_event("mary", booking, "tentative:calendar")
+
+
+def test_transport_refuses_rejected_booking(booking):
+    booking.status = "rejected"
+    with pytest.raises(RuntimeError, match="rejected"):
+        transport.check(booking, {"accessible": True})
+
+
+def test_call_spec_accepts_null_search_area_from_intake():
+    intake = IntakeRequest(
+        care_type="dental cleaning",
+        time_range={
+            "start": "2026-11-24T13:00:00-06:00",
+            "end": "2026-11-24T17:00:00-06:00",
+        },
+        needs_ride=True,
+        search_area=None,
+    )
+    schema = json.loads((ROOT / "shared" / "intake_request.schema.json").read_text())
+    jsonschema.validate(intake.model_dump(mode="json"), schema)
+    call = CallSpec(
+        clinic=places.find_clinics("dental cleaning", "near home")[0],
+        request=intake,
+        windows=[],
+        call_id="mock-null-area",
+    )
+    assert call.request.search_area is None

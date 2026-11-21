@@ -1,4 +1,4 @@
-﻿# Mock adapter handoff (#14)
+# Mock adapter handoff (#14)
 
 Calendar, Places, distance, SMS and transport expose the existing signatures from
 `docs/ARCHITECTURE.md`. All results are Pydantic facts from `integrations.types`.
