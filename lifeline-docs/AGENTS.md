@@ -4,7 +4,7 @@
 
 ## Mission and non-goals
 
-Ship **one safe, complete, reproducible MVP**: phone/text request → Nemotron planning → simulated clinic appointment → simulated inaccessible transport → approved family SMS response → verified completion and dashboard. Do not expand scope into real clinical advice, real patient data, unrestricted live booking, or full multi-agent architecture.
+Ship **one safe, complete, reproducible MVP**: phone/text request → Nemotron planning → simulated clinic appointment → simulated inaccessible transport → approved family SMS response → verified completion and dashboard (with live call captions and call history). Do not expand scope into real clinical advice, real patient data, unrestricted live booking, or full multi-agent architecture.
 
 ## Ownership (replace placeholders with GitHub handles)
 

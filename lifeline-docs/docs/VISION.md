@@ -56,7 +56,7 @@ AI agents + scheduling/optimization + accessible HCI + gerontology and family ca
 - **Verifiable actions:** keep evidence and timestamps for status transitions.
 - **Approvals in code:** the model can propose a step; software enforces permissions and authorization.
 - **No medical judgment:** coordinate administrative tasks, never diagnose or change treatment.
-- **Accessible by design:** repetition, slower speech, concise confirmation, optional keypad/text or human assistance.
+- **Accessible by design:** repetition, slower speech, concise confirmation, optional keypad/text or human assistance. Live captions of what LifeLine says help users with hearing loss, and a readable call history lets users check what was agreed afterwards.
 - **Graceful fallback:** state survives dropped calls and tool failures; explain what remains unresolved.
 
 ## Safety and operational constraints
@@ -66,6 +66,7 @@ Real providers may require direct identity verification and may refuse third-par
 ## Longer-term roadmap (not MVP commitments)
 
 - Configurable family roles, sharing and revocation; caregiver-assisted enrollment.
+- Opt-in, revocable family access to call transcripts and history; user-controlled transcript retention and deletion.
 - Multi-provider and real transport adapters; delayed follow-up and rescheduling.
 - Multilingual and alternate interface channels.
 - Document-to-action workflows (letters and notices); optional link to CareBridge concept.

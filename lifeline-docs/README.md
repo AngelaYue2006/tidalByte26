@@ -21,6 +21,7 @@ LifeLine is a **prototype** of a phone-first AI personal advocate. An older adul
 - **Architecture:** **one Nemotron orchestrator**, modular tools and deterministic checks. Multiple model agents are a stretch goal.
 - **Integrations:** Twilio for calls/SMS, ElevenLabs for speech where practical, Google Calendar for availability/events, Next.js family dashboard, FastAPI backend. Use mock adapters immediately and substitute real ones after vertical slice works.
 - **Family UX:** dashboard + SMS with **basic backend permission enforcement**; granular, configurable permissions are stretch.
+- **Live captions + history:** during a call, the dashboard streams the agent's reply as it is generated (Server-Sent Events), and past calls/tasks are kept in a history view. Both are owner-only by default; family viewers never see transcripts in the MVP. See *Live call streaming and history* in `docs/ARCHITECTURE.md`.
 - **No PHI or real patient information** in demo; use synthetic users and service providers.
 
 ## Proposed repo layout
@@ -47,7 +48,7 @@ lifeline/
 - [ ] Create clean repo and copy these Markdown files into it.
 - [ ] Assign each workstream to an actual GitHub handle in `AGENTS.md`.
 - [ ] Confirm hackathon duration, final demo deadline, and judges' Nemotron requirements.
-- [ ] Verify Nemotron endpoint and actual model name, Twilio phone/SMS permissions, ElevenLabs interface, Google Calendar OAuth/test calendar, callback hosting and credentials **before** building around them.
+- [ ] Verify Nemotron endpoint and actual model name (and whether it supports `stream: true` for the Reply step), Twilio phone/SMS permissions, ElevenLabs interface, Google Calendar OAuth/test calendar, callback hosting and credentials **before** building around them.
 - [ ] Agree on the API/schema contract in `docs/ARCHITECTURE.md`.
 - [ ] Build a **text → mock tools → task events → dashboard** vertical slice first.
 - [ ] Add phone and SMS integrations second; keep deterministic fallback switches.
