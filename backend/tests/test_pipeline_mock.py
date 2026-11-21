@@ -73,15 +73,17 @@ class CountingVoice(VoiceMockBridge):
         return confirmation
 
 
-def make_client(monkeypatch, tmp_path, voice=None, nano: FakeNano | None = None):
-    """The app with the default wiring (`Deps()`), only Nano and Super replaced by stand-ins and the clock pinned."""
+def make_client(monkeypatch, tmp_path, voice=None, nano: FakeNano | None = None, **deps_overrides):
+    """The app with the default wiring (`Deps()`), only Nano and Super replaced by stand-ins and the clock pinned.
+    `deps_overrides` replace other `Deps` fields (a counting `sms_send`, say) or pass `environ` for extra settings."""
+    environ = {"DATABASE_URL": f"sqlite:///{tmp_path}/lifeline.db", "DEMO_PHONE_ALLOWLIST": FAKE_PHONES, **deps_overrides.pop("environ", {})}
     monkeypatch.setenv("DEMO_PHONE_ALLOWLIST", FAKE_PHONES)  # the integrations mocks read the allowlist from the environment
     for var in ("VOICE_MODE", "PLACES_MODE", "CALENDAR_MODE", "SMS_MODE", "TRANSPORT_MODE"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("METRICS_PATH", str(tmp_path / "metrics.jsonl"))
-    settings = load_settings(env_file=None, environ={"DATABASE_URL": f"sqlite:///{tmp_path}/lifeline.db", "DEMO_PHONE_ALLOWLIST": FAKE_PHONES})
+    settings = load_settings(env_file=None, environ=environ)
     voice = voice or CountingVoice()
-    deps = Deps(voice=voice, intake_model=lambda: nano or FakeNano(), rank_client=FakeSuper, now=lambda: DEMO_NOW)
+    deps = Deps(voice=voice, intake_model=lambda: nano or FakeNano(), rank_client=FakeSuper, now=lambda: DEMO_NOW, **deps_overrides)
     app = create_app(settings, deps=deps)
     client = TestClient(app)
     client.__enter__()

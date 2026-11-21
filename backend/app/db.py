@@ -1,4 +1,4 @@
-"""SQLite engine and session. Tables: tasks, contacts, calls, turns, events."""
+"""SQLite engine and session. Tables: tasks, contacts, calls, turns, events, receipts."""
 
 from __future__ import annotations
 
