@@ -1,37 +1,162 @@
-// EventSource client for GET /api/live?viewer_id=... Applies snapshot, dedupes by id, reconnects.
-// Poll fallback when NEXT_PUBLIC_LIVE_STREAM_MODE=poll. Full client lands in a later issue.
+// EventSource client for GET /api/live?viewer_id=...
+// Applies snapshot, dedupes by id, reconnects. Poll fallback when NEXT_PUBLIC_LIVE_STREAM_MODE=poll.
 
-/** Same-origin SSE URL; viewer_id comes from the role picker. */
+import { getEvents } from "@/lib/api";
+import {
+  emptyDashboard,
+  reduceDashboard,
+  type DashboardState,
+} from "@/lib/dashboard";
+import { isLiveEvent, type LiveEvent } from "@/lib/events";
+
 export function liveUrl(viewerId: string): string {
   return `/api/live?viewer_id=${encodeURIComponent(viewerId)}`;
 }
 
 export type LiveHandlers = {
-  onEvent?: (data: unknown, id: string | null) => void;
-  onError?: (err: Event) => void;
+  onState?: (state: DashboardState) => void;
+  onEvent?: (event: LiveEvent, id: string | null) => void;
+  onError?: (err: unknown) => void;
 };
+
+export type ConnectLiveOptions = LiveHandlers & {
+  /** Required when NEXT_PUBLIC_LIVE_STREAM_MODE=poll. */
+  taskId?: string;
+  /** Poll interval ms (default 1000). */
+  pollMs?: number;
+};
+
+function streamMode(): "sse" | "poll" {
+  const mode = process.env.NEXT_PUBLIC_LIVE_STREAM_MODE ?? "sse";
+  return mode === "poll" ? "poll" : "sse";
+}
+
+function parsePayload(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return raw;
+  }
+}
+
+type StreamGate = {
+  state: DashboardState;
+  seen: Set<string>;
+  apply: (event: LiveEvent, id: string | null) => void;
+};
+
+function createGate(handlers: LiveHandlers): StreamGate {
+  const gate: StreamGate = {
+    state: emptyDashboard(),
+    seen: new Set(),
+    apply(event, id) {
+      if (id !== null && id !== "" && gate.seen.has(id)) return;
+      if (id) gate.seen.add(id);
+
+      if (event.type === "snapshot") {
+        // Reconnect: replace stream state; forget ids from the previous connection.
+        gate.seen.clear();
+        if (id) gate.seen.add(id);
+        gate.state = reduceDashboard(emptyDashboard(), event);
+      } else {
+        gate.state = reduceDashboard(gate.state, event);
+      }
+
+      handlers.onEvent?.(event, id);
+      handlers.onState?.(gate.state);
+    },
+  };
+  return gate;
+}
+
+function connectSse(viewerId: string, handlers: LiveHandlers): () => void {
+  const gate = createGate(handlers);
+  const source = new EventSource(liveUrl(viewerId));
+
+  source.onmessage = (ev) => {
+    const payload = parsePayload(ev.data);
+    if (!isLiveEvent(payload)) return;
+    gate.apply(payload, ev.lastEventId || null);
+  };
+
+  source.onerror = (err) => {
+    // Browser reconnects EventSource automatically; surface the error to the UI.
+    handlers.onError?.(err);
+  };
+
+  return () => source.close();
+}
+
+function connectPoll(
+  viewerId: string,
+  taskId: string,
+  handlers: LiveHandlers,
+  pollMs: number,
+): () => void {
+  const gate = createGate(handlers);
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const payload = await getEvents(taskId, viewerId);
+      for (const item of normalizeEventList(payload)) {
+        gate.apply(item.event, item.id);
+      }
+    } catch (err) {
+      handlers.onError?.(err);
+    } finally {
+      if (!stopped) timer = setTimeout(() => void tick(), pollMs);
+    }
+  };
+
+  void tick();
+
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
+}
+
+type Listed = { event: LiveEvent; id: string | null };
+
+function normalizeEventList(payload: unknown): Listed[] {
+  if (!Array.isArray(payload)) {
+    if (payload && typeof payload === "object" && "events" in payload) {
+      return normalizeEventList((payload as { events: unknown }).events);
+    }
+    return [];
+  }
+  const out: Listed[] = [];
+  for (const row of payload) {
+    if (!row || typeof row !== "object") continue;
+    const rec = row as {
+      id?: string | number;
+      event?: unknown;
+      payload?: unknown;
+    };
+    const id = rec.id === undefined || rec.id === null ? null : String(rec.id);
+    const inner = rec.event ?? rec.payload ?? row;
+    if (isLiveEvent(inner)) out.push({ event: inner, id });
+  }
+  return out;
+}
 
 /**
  * Open the live stream for this viewer. Returns a close function.
- * Snapshot / dedupe / poll are implemented in the SSE client issue.
+ * SSE reconnects via the browser; each reconnect snapshot replaces dashboard state.
  */
-export function connectLive(viewerId: string, handlers: LiveHandlers = {}): () => void {
-  const mode = process.env.NEXT_PUBLIC_LIVE_STREAM_MODE ?? "sse";
-  if (mode === "poll") {
-    // Poll path is wired in the SSE client issue; keep the viewer_id contract here.
-    return () => undefined;
-  }
-
-  const source = new EventSource(liveUrl(viewerId));
-  source.onmessage = (ev) => {
-    try {
-      handlers.onEvent?.(JSON.parse(ev.data), ev.lastEventId || null);
-    } catch {
-      handlers.onEvent?.(ev.data, ev.lastEventId || null);
+export function connectLive(viewerId: string, options: ConnectLiveOptions = {}): () => void {
+  const { taskId, pollMs = 1000, ...handlers } = options;
+  if (streamMode() === "poll") {
+    if (!taskId) {
+      handlers.onError?.(new Error("poll mode requires taskId"));
+      return () => undefined;
     }
-  };
-  source.onerror = (err) => {
-    handlers.onError?.(err);
-  };
-  return () => source.close();
+    return connectPoll(viewerId, taskId, handlers, pollMs);
+  }
+  return connectSse(viewerId, handlers);
 }
+
+export type { DashboardState };

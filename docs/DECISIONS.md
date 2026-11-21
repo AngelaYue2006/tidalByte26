@@ -40,3 +40,8 @@
 - Twilio trial: all three teammate numbers verified; SMS webhook reachable through the tunnel.
 - Google Cloud project with Calendar, Places and Distance Matrix enabled; OAuth test user added.
 - Ollama with a 4-bit Nemotron Nano pulled on the demo laptop.
+
+## Open items from the shared schemas (#2)
+
+- `call_result.price` and `call_result.slot` are display strings (`"$95"`, `"Thu 9:30"`), as the prototype renders them. The numeric price and ISO slot live in `Offer` and the task `booking`; the dashboard never computes from the event. Default taken in `shared/events.schema.json`.
+- `IntakeRequest.time_range` is `{start, end}` as ISO date-times in the owner's timezone, resolved on device from phrases like "this week". Default taken in `shared/intake_request.schema.json`.
