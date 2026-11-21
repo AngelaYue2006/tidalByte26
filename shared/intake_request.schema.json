@@ -1,1 +1,49 @@
-{ "$schema": "https://json-schema.org/draft/2020-12/schema", "title": "intake_request", "type": "object" }
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeline.local/shared/intake_request.schema.json",
+  "title": "intake_request",
+  "description": "The redacted IntakeRequest produced on the device by Nemotron Nano. It is the only thing allowed to leave the device: no raw utterance, no symptoms, no identifiers.",
+  "type": "object",
+  "properties": {
+    "care_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What the appointment is for, e.g. dental cleaning."
+    },
+    "budget_max": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "Cap in US dollars, or null when the request did not state one."
+    },
+    "insurance_carrier": {
+      "type": ["string", "null"],
+      "description": "Carrier name only, e.g. Delta Dental. Never a member ID."
+    },
+    "time_range": {
+      "type": "object",
+      "description": "Date range the request may be scheduled in, resolved to the owner's timezone.",
+      "properties": {
+        "start": { "type": "string", "format": "date-time" },
+        "end": { "type": "string", "format": "date-time" }
+      },
+      "required": ["start", "end"],
+      "additionalProperties": false
+    },
+    "needs_ride": { "type": "boolean" },
+    "search_area": {
+      "type": ["string", "null"],
+      "description": "Where to search, e.g. near home or a city name. Never a street address."
+    },
+    "dropped_fields": {
+      "type": "array",
+      "description": "Names of the fields Nano removed, for the redaction metric. Field names from this fixed list only, never values.",
+      "items": {
+        "type": "string",
+        "enum": ["symptoms", "diagnosis", "medications", "allergies", "mobility_details", "member_id", "date_of_birth", "patient_name", "address", "email", "contact_name", "contact_phone"]
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": ["care_type", "budget_max", "insurance_carrier", "time_range", "needs_ride", "search_area", "dropped_fields"],
+  "additionalProperties": false
+}

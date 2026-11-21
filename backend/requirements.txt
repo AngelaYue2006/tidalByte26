@@ -11,3 +11,4 @@ google-auth-oauthlib
 pydantic
 pytest
 pytest-asyncio
+jsonschema

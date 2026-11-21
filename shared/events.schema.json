@@ -1,1 +1,288 @@
-{ "$schema": "https://json-schema.org/draft/2020-12/schema", "title": "events", "type": "object" }
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeline.local/shared/events.schema.json",
+  "title": "events",
+  "description": "Every live event the backend emits over GET /api/live and GET /api/tasks/{id}/events. One entry per type in docs/ARCHITECTURE.md, Live events. The envelope fields (task_id, at, visibility) are optional so a bare payload validates too.",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/call_start" },
+    { "$ref": "#/$defs/call_status" },
+    { "$ref": "#/$defs/transcript" },
+    { "$ref": "#/$defs/call_result" },
+    { "$ref": "#/$defs/decision" },
+    { "$ref": "#/$defs/booked" },
+    { "$ref": "#/$defs/notified" },
+    { "$ref": "#/$defs/approval_required" },
+    { "$ref": "#/$defs/approved" },
+    { "$ref": "#/$defs/transport_check" },
+    { "$ref": "#/$defs/contact_request" },
+    { "$ref": "#/$defs/contact_reply" },
+    { "$ref": "#/$defs/ride_confirmed" },
+    { "$ref": "#/$defs/task_updated" },
+    { "$ref": "#/$defs/snapshot" },
+    { "$ref": "#/$defs/heartbeat" }
+  ],
+  "$defs": {
+    "envelope": {
+      "type": "object",
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "visibility": { "type": "string", "enum": ["owner", "contact", "internal"] },
+        "simulated": { "type": "boolean", "description": "True when a mock adapter produced this event." }
+      }
+    },
+    "call_id": { "type": "string", "minLength": 1 },
+    "request": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "request" },
+            "text": { "type": "string", "description": "Raw utterance. Owner visibility only; an event with visibility contact must not carry it." },
+            "chips": {
+              "type": "array",
+              "description": "Redacted facts. A chip starting with ! renders green (e.g. !Processed on device).",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          },
+          "required": ["type", "chips"]
+        },
+        {
+          "if": { "properties": { "visibility": { "const": "contact" } }, "required": ["visibility"] },
+          "then": { "not": { "required": ["text"] } }
+        }
+      ]
+    },
+    "call_start": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "call_start" },
+            "call_id": { "$ref": "#/$defs/call_id" },
+            "clinic": { "type": "string", "minLength": 1 },
+            "meta": { "type": "string", "description": "Distance line, e.g. 1.2 mi · 6 min." }
+          },
+          "required": ["type", "call_id", "clinic", "meta"]
+        }
+      ]
+    },
+    "call_status": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "call_status" },
+            "call_id": { "$ref": "#/$defs/call_id" },
+            "status": { "type": "string", "enum": ["dialing", "live", "hold", "done"] }
+          },
+          "required": ["type", "call_id", "status"]
+        }
+      ]
+    },
+    "transcript": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "transcript" },
+            "call_id": { "$ref": "#/$defs/call_id" },
+            "speaker": { "type": "string", "enum": ["agent", "clinic"] },
+            "text": { "type": "string" }
+          },
+          "required": ["type", "call_id", "speaker", "text"]
+        }
+      ]
+    },
+    "call_result": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "call_result" },
+            "call_id": { "$ref": "#/$defs/call_id" },
+            "price": { "type": "string", "description": "Display price, e.g. $95." },
+            "slot": { "type": "string", "description": "Display slot, e.g. Thu 9:30." },
+            "insured": { "type": "boolean" },
+            "slotOk": { "type": "boolean", "description": "True when the slot falls inside a free window." }
+          },
+          "required": ["type", "call_id", "price", "slot", "insured", "slotOk"]
+        }
+      ]
+    },
+    "decision": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "decision" },
+            "winner": { "$ref": "#/$defs/call_id" },
+            "title": { "type": "string", "minLength": 1 },
+            "reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+            "second": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "tradeoff": { "type": "string" }
+          },
+          "required": ["type", "winner", "title", "reasons", "second", "tradeoff"]
+        }
+      ]
+    },
+    "booked": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "booked" },
+            "calendar": { "type": "string", "description": "Calendar card text. Empty when tentative, since no event is created." },
+            "sms_user": { "type": "string" },
+            "tentative": { "type": "boolean" }
+          },
+          "required": ["type", "calendar", "sms_user"]
+        }
+      ]
+    },
+    "notified": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "notified" },
+            "sms_contact": { "type": "string" },
+            "sms_user": { "type": "string" }
+          },
+          "required": ["type", "sms_contact"]
+        }
+      ]
+    },
+    "approval_required": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "approval_required" },
+            "pick": {
+              "type": "object",
+              "properties": {
+                "clinic": { "type": "string", "minLength": 1 },
+                "slot": { "type": "string", "minLength": 1 },
+                "price": { "type": "string", "minLength": 1 }
+              },
+              "required": ["clinic", "slot", "price"],
+              "additionalProperties": false
+            },
+            "expires_at": { "type": "string", "format": "date-time" }
+          },
+          "required": ["type", "pick", "expires_at"]
+        }
+      ]
+    },
+    "approved": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "approved" },
+            "by": { "type": "string", "minLength": 1, "description": "Actor id of the owner who approved." },
+            "via": { "type": "string", "enum": ["dashboard", "sms"] }
+          },
+          "required": ["type", "by", "via"]
+        }
+      ]
+    },
+    "transport_check": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "transport_check" },
+            "status": { "type": "string", "enum": ["checking", "unavailable", "available"] },
+            "reason": { "type": "string", "description": "Error code such as UNAVAILABLE_ACCESSIBLE_RIDE; empty while checking." },
+            "simulated": { "const": true, "description": "Always true: the transport check is simulated (docs/DECISIONS.md D12)." }
+          },
+          "required": ["type", "status", "reason", "simulated"]
+        }
+      ]
+    },
+    "contact_request": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "contact_request" },
+            "contact": { "type": "string", "minLength": 1, "description": "Contact's name, never their phone." },
+            "message": { "type": "string", "minLength": 1, "description": "The scoped message Nano wrote: clinic, time, address, ride need." }
+          },
+          "required": ["type", "contact", "message"]
+        }
+      ]
+    },
+    "offer": {
+      "type": "object",
+      "properties": {
+        "can_drive": { "type": "boolean" },
+        "pickup_time": { "type": ["string", "null"] }
+      },
+      "required": ["can_drive"],
+      "additionalProperties": false
+    },
+    "contact_reply": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "contact_reply" },
+            "contact": { "type": "string", "minLength": 1 },
+            "text": { "type": "string" },
+            "offer": { "$ref": "#/$defs/offer" }
+          },
+          "required": ["type", "contact", "text", "offer"]
+        }
+      ]
+    },
+    "ride_confirmed": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "ride_confirmed" },
+            "driver": { "type": "string", "minLength": 1 },
+            "pickup_time": { "type": "string", "minLength": 1 }
+          },
+          "required": ["type", "driver", "pickup_time"]
+        }
+      ]
+    },
+    "task_updated": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "task_updated" },
+            "status": { "$ref": "task.schema.json#/$defs/status" },
+            "reason": { "type": "string", "description": "Error code when the status is failed." }
+          },
+          "required": ["type", "status"]
+        }
+      ]
+    },
+    "snapshot": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "type": { "const": "snapshot" },
+            "task": { "oneOf": [ { "$ref": "task.schema.json" }, { "type": "null" } ] },
+            "calls": { "type": "array", "items": { "$ref": "task.schema.json#/$defs/call" } },
+            "events": { "type": "array", "items": { "$ref": "#" } }
+          },
+          "required": ["type", "task", "calls", "events"]
+        }
+      ]
+    },
+    "heartbeat": {
+      "type": "object",
+      "properties": { "type": { "const": "heartbeat" } },
+      "required": ["type"]
+    }
+  }
+}
