@@ -19,12 +19,6 @@
 | D13 | Repo layout | `backend/` (Person 1), `integrations/` (Person 2), `frontend/` (Person 3), `shared/` and `tests/` by review. | Three people, one folder each, shared contracts by PR. |
 | D14 | Audio | Text transcripts only in the live system. The prototype's `audio/*.mp3` clips are ElevenLabs-generated voices for the replay demo, never recordings of real people. | Both original doc sets forbid storing recordings. |
 
-### Guided first-time intake
-
-For a first dental request, collect the owner's missing scheduling preferences before starting clinic calls. The initial demo asks about a spending limit and transportation, one question per screen. An explicit “no maximum” or “I have a ride” resolves that field. Skip questions answered in the request. Mary answers in her owner view when Sarah starts a request for her.
-
-The simulated dental scenario already specifies a cleaning, Delta Dental and the demo week. The question step does not collect a policy number, birth date, symptoms or payment details. Completing intake starts the search. Mary still approves the selected appointment separately before booking.
-
 ## Why the intake model runs locally (the Nemotron track story)
 
 **What the raw request contains.** When Mary says "I need a cleaning this week, under $150, I have Delta Dental, my knee makes walking hard so I'll need a ride", the text holds symptoms, mobility details, an insurance carrier and, in the user record, her member ID, date of birth, home address and Sarah's phone number.

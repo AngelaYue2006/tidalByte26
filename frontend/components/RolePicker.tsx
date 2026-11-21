@@ -39,6 +39,9 @@ export default function RolePicker() {
         <option value="owner">{VIEWERS.owner.label}</option>
         <option value="contact">{VIEWERS.contact.label}</option>
       </select>
+      <span className="faint" aria-live="polite">
+        viewer_id={viewer.viewerId}
+      </span>
     </label>
   );
 }

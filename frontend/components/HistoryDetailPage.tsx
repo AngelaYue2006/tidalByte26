@@ -1,10 +1,7 @@
 "use client";
 
-import { workspaceMode } from "@/lib/workspace";
-
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import DemoCallReview from "./DemoCallReview";
 import HistoryDetail from "@/components/HistoryDetail";
 import { getEvents, getTask } from "@/lib/api";
 import type { LiveEvent } from "@/lib/events";
@@ -26,16 +23,12 @@ function seedFor(taskId: string, role: "owner" | "contact"): HistoryTask | null 
 
 /** Loads one task + events; seeded fixtures when preview, API empty, or seed id. */
 export default function HistoryDetailPage({ taskId }: Props) {
-  return taskId === "demo-cleaning" ? <DemoCallReview/> : <RecordedHistoryDetail key={taskId} taskId={taskId}/>;
-}
-
-function RecordedHistoryDetail({ taskId }: Props) {
   const searchParams = useSearchParams();
   const viewer = viewerFromSearchParams(searchParams);
-  const preview = workspaceMode(searchParams) !== "live";
+  const preview = searchParams.get("preview") === "1";
+  const density = searchParams.get("density");
 
-
-  const initial = preview ? seedFor(taskId, viewer.role) : null;
+  const initial = seedFor(taskId, viewer.role);
   const [task, setTask] = useState<HistoryTask | null>(initial);
   const [events, setEvents] = useState<LiveEvent[]>(() =>
     initial ? (SEEDED_EVENTS[taskId] ?? []) : [],
@@ -61,9 +54,9 @@ function RecordedHistoryDetail({ taskId }: Props) {
     }
 
     async function load() {
-      if (preview) { applySeed(); return; }
-      setMissing(false);
-      setTask(null);
+      // Always paint seed first when we have one so detail never flashes empty.
+      applySeed();
+      if (preview) return;
 
       try {
         const [taskRaw, eventsRaw] = await Promise.all([
@@ -73,7 +66,7 @@ function RecordedHistoryDetail({ taskId }: Props) {
         const tasks = parseTasksPayload(Array.isArray(taskRaw) ? taskRaw : [taskRaw]);
         const found = tasks[0] ?? (isTaskShape(taskRaw) ? (taskRaw as HistoryTask) : null);
         if (!found) {
-          if (!cancelled) setMissing(true);
+          if (!cancelled) applySeed();
           return;
         }
         if (!cancelled) {
@@ -83,7 +76,7 @@ function RecordedHistoryDetail({ taskId }: Props) {
           setMissing(false);
         }
       } catch {
-        if (!cancelled) setMissing(true);
+        if (!cancelled) applySeed();
       }
     }
 
@@ -114,8 +107,10 @@ function RecordedHistoryDetail({ taskId }: Props) {
       <HistoryDetail
         task={task}
         events={events}
+        viewerId={viewer.viewerId}
         role={viewer.role}
         simulated={simulated}
+        density={density}
       />
     </main>
   );

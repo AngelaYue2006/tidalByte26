@@ -53,7 +53,7 @@ export default function ContactReply({
   return (
     <section className="card contact-reply" aria-label="Offer a ride">
       <h2 className="transport-title">Can you drive Mary?</h2>
-      <p className="muted">Sarah, Mary needs a ride to her appointment. You can reply here or by text.</p>
+      <p className="muted">Reply here or by SMS. Owner sees status only.</p>
       <div className="decision-actions">
         <button
           type="button"

@@ -1,33 +1,28 @@
 "use client";
 
-import { workspaceMode } from "@/lib/workspace";
-
-import { useState, useEffect } from "react";
-import { demoArchive, readDemoRun } from "@/lib/callDemo";
 import { useSearchParams } from "next/navigation";
+import SceneArt from "@/components/SceneArt";
 import { viewerFromSearchParams } from "@/lib/viewer";
 
 const EMBED_SRC = process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_EMBED_SRC?.trim() ?? "";
 
 /** Full Google Calendar embed, or a labelled empty state when env is unset. */
 export default function CalendarPage() {
-  const params = useSearchParams();
-  const viewer = viewerFromSearchParams(params);
-
-  const [showDemo, setShowDemo] = useState(false);
-  useEffect(() => {
-    setShowDemo(demoArchive() === "approved" || !!readDemoRun()?.approved);
-  }, []);
-  const hasDemo = workspaceMode(params) === "demo" && showDemo;
+  const viewer = viewerFromSearchParams(useSearchParams());
 
   return (
     <main className="calendar-page">
-      <header className="studio-heading"><div><h1>{viewer.role === "contact" ? "Mary’s calendar" : "Calendar"}</h1>
-        <p className="muted">Appointments for Mary Johnson. Times shown in Central time.</p></div></header>
-      {hasDemo && <section className="card calendar-demo">
-        <p className="eyebrow">Simulated appointment for Mary</p><h2>Dental cleaning</h2>
-        <p><strong>Thursday, November 26 · 9:30 AM</strong></p><p>Bright Smile Dental · $95</p>
-      </section>}
+      <header className="page-hero card page-hero-mint">
+        <div className="page-hero-copy">
+          <p className="page-kicker">Schedule</p>
+          <h1 className="calendar-title">Calendar</h1>
+          <p className="muted calendar-sub">
+            Mary&apos;s appointments for {viewer.name}. Times in America/Chicago.
+          </p>
+        </div>
+        <SceneArt name="calendar" className="scene-art page-hero-art" />
+      </header>
+
       {EMBED_SRC ? (
         <div className="calendar-frame-wrap card">
           <iframe
@@ -38,10 +33,22 @@ export default function CalendarPage() {
             referrerPolicy="no-referrer-when-downgrade"
           />
         </div>
-      ) : hasDemo ? null : (
+      ) : (
         <div className="card calendar-empty">
-          <h2 className="calendar-empty-title">No calendar connected</h2>
-          <p className="muted">Appointments from Mary’s calendar will appear here once it is connected.</p>
+          <SceneArt name="care" className="scene-art scene-art-sm" />
+          <p className="calendar-empty-title">Google Calendar embed not configured</p>
+          <p className="muted">
+            Add a public calendar embed URL to{" "}
+            <code>NEXT_PUBLIC_GOOGLE_CALENDAR_EMBED_SRC</code> in <code>.env</code>, then restart{" "}
+            <code>npm run dev</code>. Demo calendar only — make it public under Calendar settings →
+            Access permissions → Integrate calendar.
+          </p>
+          <p className="faint calendar-empty-hint">
+            Example:{" "}
+            <code>
+              https://calendar.google.com/calendar/embed?src=…&amp;ctz=America%2FChicago
+            </code>
+          </p>
         </div>
       )}
     </main>

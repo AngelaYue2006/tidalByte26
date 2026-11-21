@@ -24,9 +24,6 @@ type SpeechWindow = Window & {
 
 export type RequestBarProps = {
   viewer: Viewer;
-  simple?: boolean;
-  demo?: boolean;
-  onSent?: (text: string) => void;
   /** Chips from the live `request` event. */
   chips?: string[];
   /** Redacted/owner request text from the live event (owner may see it). */
@@ -46,7 +43,7 @@ function getSpeechRecognition(): SpeechRecognitionLike | null {
 }
 
 /** Big mic + text input. Posts to /api/requests. Chips with `!` render green + lock. */
-export default function RequestBar({ viewer, chips = [], requestText, simple, demo, onSent }: RequestBarProps) {
+export default function RequestBar({ viewer, chips = [], requestText }: RequestBarProps) {
   const owner = VIEWERS.owner;
   const contact = VIEWERS.contact;
   const [text, setText] = useState("");
@@ -70,14 +67,13 @@ export default function RequestBar({ viewer, chips = [], requestText, simple, de
     setSubmitting(true);
     setError(null);
     try {
-      if (!demo) await postRequest(viewer.viewerId, {
+      await postRequest(viewer.viewerId, {
         owner_id: owner.viewerId,
         actor_id: viewer.viewerId,
         text: trimmed,
         idempotency_key: newIdempotencyKey(),
       });
       setText("");
-      onSent?.(trimmed);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send request");
     } finally {
@@ -132,22 +128,6 @@ export default function RequestBar({ viewer, chips = [], requestText, simple, de
       setListening(false);
     }
   }
-
-  if (simple) return (
-    <form className="simple-form" onSubmit={onSubmit}>
-      <label htmlFor="simple-request">{viewer.role === "contact" ? "Tell LifeLine what Mary needs" : "Tell LifeLine what you need"}</label>
-      <textarea id="simple-request" rows={3} value={text} disabled={submitting}
-        placeholder={viewer.role === "contact" ? "For example, Mary needs a dental cleaning this week." : "For example, I need a dental cleaning this week."} onChange={e => setText(e.target.value)} />
-      <div className="form-actions">
-        <button className="primary-action" disabled={!text.trim() || submitting} type="submit">
-          <IconSend size={20}/>{submitting ? "Sending…" : "Send request"}
-        </button>
-        {speechSupported && <button className="quiet-button" type="button" onClick={toggleMic} disabled={submitting}
-          aria-pressed={listening}><IconMicrophone size={20}/>{listening ? "Stop listening" : "Speak request"}</button>}
-      </div>
-      {error && <p role="alert">{error}</p>}
-    </form>
-  );
 
   const forLine =
     viewer.role === "contact"

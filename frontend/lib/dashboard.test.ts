@@ -68,15 +68,3 @@ describe("reduceDashboard with prototype SCENARIO", () => {
     expect(emptyDashboard()).toEqual({ calls: [] });
   });
 });
-
-it("keeps call graph nodes in event order across interleaved calls and follow-up turns", () => {
-  const state = foldEvents([
-    { type: "call_start", call_id: "a", clinic: "Clinic A" },
-    { type: "call_start", call_id: "b", clinic: "Clinic B" },
-    { type: "transcript", call_id: "b", speaker: "agent", text: "Any openings?" },
-    { type: "call_result", call_id: "a", slot: "Thursday", price: "$95", insured: true, slotOk: true },
-    { type: "transcript", call_id: "a", speaker: "clinic", text: "Please call back to confirm." },
-  ]);
-  expect(state.calls[0].graph?.map(node => node.label)).toEqual(["Clinic call", "Offer received", "Clinic replied"]);
-  expect(state.calls[1].graph?.map(node => node.text)).toEqual(["Clinic B", "Any openings?"]);
-});

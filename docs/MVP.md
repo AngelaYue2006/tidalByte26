@@ -4,9 +4,6 @@
 
 **One request:** Mary needs a dental cleaning this week, under $150, with Delta Dental, and needs a ride. **One comparison:** three clinics called in parallel; Bright Smile Dental wins on fit, price and insurance. **One approval:** Mary taps Approve. **One failure:** the simulated transport check finds no accessible ride. **One escalation:** Sarah, the emergency contact, is texted a scoped request and replies that she can drive. **One completion:** appointment confirmed, calendar event created, ride confirmed, both notified, dashboard shows the whole trail.
 
-**First-time dental demo:** Send “I need a dental cleaning.” Answer the spending-limit and ride questions one at a time, then start the three simulated calls. Repeat with “I need a dental cleaning under $150 and I need a ride” to skip both questions. Reload between questions to check resume. Switch to Sarah to check that only Mary can answer. Enter a cap below $95 to exercise the no-offer outcome.
-
-
 **Required connected pieces:** local Nemotron Nano intake (Ollama), Google Calendar free/busy and insert, Google Places and Distance Matrix, three outbound ElevenLabs calls over Twilio with Nemotron Lightning answering, Nemotron Super ranking with reason tags, SQLite task state, SSE live stream, Next.js dashboard with owner and contact views, Twilio SMS both ways, simulated transport adapter.
 
 **Fallbacks (same events, labelled on screen):** `VOICE_MODE=mock` scripted receptionists; `PLACES_MODE=fixture` three hard-coded clinics; `CALENDAR_MODE=mock`; `SMS_MODE=mock` writes to the dashboard instead of sending; `LIVE_STREAM_MODE=poll`.

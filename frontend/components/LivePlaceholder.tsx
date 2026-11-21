@@ -1,23 +1,20 @@
 "use client";
 
-import { workspaceMode } from "@/lib/workspace";
-
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import SimpleLiveFlow from "./SimpleLiveFlow";
+import BookingHero from "@/components/BookingHero";
 import CallCard from "@/components/CallCard";
-import RecordedCallGraphs from "./RecordedCallGraphs";
+import CallStrip from "@/components/CallStrip";
 import Confirmations from "@/components/Confirmations";
 import ContactReply from "@/components/ContactReply";
 import DecisionCard from "@/components/DecisionCard";
 import RequestBar from "@/components/RequestBar";
-import DemoRequestFlow from "./DemoRequestFlow";
-import DensityToggle from "./DensityToggle";
+import SceneArt from "@/components/SceneArt";
 import TransportCard from "@/components/TransportCard";
 import { foldEvents, type DashboardState } from "@/lib/dashboard";
 import { densityFromSearchParams } from "@/lib/density";
 import type { LiveEvent } from "@/lib/events";
-import { connectLive } from "@/lib/live";
+import { connectLive, liveUrl } from "@/lib/live";
 import { projectForViewer } from "@/lib/project";
 import { PROTOTYPE_SCENARIO } from "@/lib/scenario";
 import { viewerFromSearchParams } from "@/lib/viewer";
@@ -79,32 +76,23 @@ const AWAITING_STATE = foldEvents(AWAITING_EVENTS);
 
 /** Live page with role-scoped projection and simple/detailed density. */
 export default function LivePlaceholder() {
-  const params = useSearchParams();
-  const viewer = viewerFromSearchParams(params);
-  const mode = workspaceMode(params);
-  if (mode === "demo") return <DemoRequestFlow viewer={viewer} key={viewer.viewerId}/>;
-  return <LiveDashboard key={viewer.viewerId + mode + (params.get("preview") ?? "")} />;
-
-}
-
-function LiveDashboard() {
   const searchParams = useSearchParams();
   const viewer = viewerFromSearchParams(searchParams);
   const density = densityFromSearchParams(searchParams, viewer.role);
   const preview = searchParams.get("preview") === "1";
   const previewAwaiting = searchParams.get("preview") === "awaiting";
+  const sse = liveUrl(viewer.viewerId);
   const [liveState, setLiveState] = useState<DashboardState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (preview || previewAwaiting) return;
     setError(null);
     const close = connectLive(viewer.viewerId, {
-      onState: next => { setLiveState(next); setError(null); },
+      onState: setLiveState,
       onError: () => setError("Live stream interrupted — reconnecting…"),
     });
     return close;
-  }, [viewer.viewerId, preview, previewAwaiting]);
+  }, [viewer.viewerId]);
 
   const rawState = useMemo(() => {
     if (liveState && (liveState.calls.length > 0 || liveState.transport || liveState.decision)) {
@@ -120,6 +108,7 @@ function LiveDashboard() {
     [rawState, viewer.role],
   );
 
+  const mode = process.env.NEXT_PUBLIC_LIVE_STREAM_MODE ?? "sse";
   const chips =
     state.request?.chips ??
     ((preview || previewAwaiting) && PREVIEW_REQUEST?.type === "request"
@@ -139,75 +128,114 @@ function LiveDashboard() {
   const showConfirmations = !!state.confirmations?.booked || !!state.confirmations?.notified;
   const simple = density === "simple";
 
-  if (!preview && !previewAwaiting && !liveState && !error) return <main aria-busy="true"><p role="status">Loading appointment activity…</p></main>;
-  const controls = <div className="activity-controls"><DensityToggle/></div>;
-  if (simple) return <>{controls}<SimpleLiveFlow state={state} viewer={viewer} taskId={taskId} demo={preview || previewAwaiting} error={error}/></>;
-
   return (
-    <main className="live-main density-detailed">
-      {controls}
-      <header className="studio-heading">
-        <div>{(preview || previewAwaiting) && <p className="eyebrow">Simulated session</p>}<h1>{viewer.role === "contact" ? "Mary’s appointment activity" : "Live dashboard"}</h1></div>
-
+    <main className={simple ? "live-main density-simple" : "live-main density-detailed"} key={density}>
+      <header className="page-hero card page-hero-live">
+        <div className="page-hero-copy">
+          <p className="page-kicker">In progress</p>
+          <h1>Live</h1>
+          <p className="muted">
+            {viewer.role === "owner"
+              ? "Speak a request — LifeLine calls clinics, picks a slot, and waits for your OK."
+              : "Watch Mary’s booking trail. Reply when a ride is needed."}
+          </p>
+        </div>
+        <SceneArt name="phone" className="scene-art page-hero-art" />
       </header>
 
       <section className="live-section live-section-request">
         <RequestBar viewer={viewer} chips={chips} requestText={requestText} />
       </section>
 
-      <section className="live-section live-section-calls">
-        {viewer.role === "owner" && calls.length > 0 ? (
-          <div className="calls" aria-label="Clinic calls">
-            {calls.map((call) => (
-              <CallCard
-                key={call.call_id}
-                call={call}
-                winner={winnerId === call.call_id}
-              />
-            ))}
-          </div>
-        ) : null}
-      </section>
-
-      {calls.length > 0 && viewer.role === "owner" && <RecordedCallGraphs calls={calls} animate/>}
-
-      <section className="live-section live-section-decision">
-        {viewer.role === "owner" && state.decision ? (
-          <DecisionCard
-            viewer={viewer}
+      {simple ? (
+        <>
+          <CallStrip calls={calls} winnerId={winnerId} />
+          <BookingHero
             decision={state.decision}
             approval={state.approval}
-            taskId={taskId}
+            confirmations={state.confirmations}
           />
-        ) : null}
-      </section>
+          {state.decision && state.approval?.pick && !state.approval?.approved ? (
+            <DecisionCard
+              viewer={viewer}
+              decision={state.decision}
+              approval={state.approval}
+              taskId={taskId}
+              compact
+            />
+          ) : null}
+          <ContactReply
+            viewer={viewer}
+            taskId={taskId}
+            awaitingReply={state.canReplyRide}
+            hasReply={!!state.contact?.reply}
+          />
+        </>
+      ) : (
+        <>
+          <section className="live-section live-section-calls">
+            {calls.length > 0 ? (
+              <div className="calls" aria-label="Clinic calls">
+                {calls.map((call) => (
+                  <CallCard
+                    key={call.call_id}
+                    call={call}
+                    winner={winnerId === call.call_id}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </section>
 
-      <section className="live-section live-section-transport">
-        <TransportCard
-          transport={state.transport}
-          contact={state.contact}
-          ride={state.confirmations?.ride}
-        />
-        <ContactReply
-          viewer={viewer}
-          taskId={taskId}
-          awaitingReply={state.canReplyRide}
-          hasReply={!!state.contact?.reply}
-        />
-        {viewer.role === "owner" && state.contact?.message && !state.contact?.reply ? (
-          <div className="card status-card">
-            <p className="muted status-card-text">
-              Waiting for {state.contact.name ?? "the contact"} to reply about the ride.
-            </p>
-          </div>
-        ) : null}
-      </section>
+          <section className="live-section live-section-decision">
+            {state.decision ? (
+              <DecisionCard
+                viewer={viewer}
+                decision={state.decision}
+                approval={state.approval}
+                taskId={taskId}
+              />
+            ) : null}
+          </section>
 
-      <section className="live-section live-section-confirm">
-        <Confirmations contactView={viewer.role === "contact"} confirmations={state.confirmations} show={showConfirmations} />
-      </section>
+          <section className="live-section live-section-transport">
+            <TransportCard
+              transport={state.transport}
+              contact={state.contact}
+              ride={state.confirmations?.ride}
+            />
+            <ContactReply
+              viewer={viewer}
+              taskId={taskId}
+              awaitingReply={state.canReplyRide}
+              hasReply={!!state.contact?.reply}
+            />
+            {viewer.role === "owner" && state.contact?.message && !state.contact?.reply ? (
+              <div className="card status-card">
+                <p className="muted status-card-text">
+                  Waiting for {state.contact.name ?? "the contact"} to reply about the ride.
+                </p>
+              </div>
+            ) : null}
+          </section>
 
-      {error && !preview && !previewAwaiting && <p role="status" className="muted">{error}</p>}
+          <section className="live-section live-section-confirm">
+            <Confirmations confirmations={state.confirmations} show={showConfirmations} />
+          </section>
+        </>
+      )}
+
+      <div className="card status-card live-meta">
+        <p className="faint placeholder-meta status-card-text">
+          Viewing as <strong>{viewer.role}</strong>
+          {" · "}
+          <strong>{density}</strong> view
+          {" · "}
+          {mode === "poll" ? "Poll mode" : "SSE"} → <code>{sse}</code>
+          {preview || previewAwaiting ? " · preview" : ""}
+        </p>
+        {error ? <p className="faint placeholder-meta">{error}</p> : null}
+      </div>
     </main>
   );
 }

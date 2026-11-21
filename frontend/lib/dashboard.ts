@@ -24,7 +24,6 @@ export type CallState = {
   call_id: string;
   clinic: string;
   meta?: string;
-  graph?: { label: string; text: string; clinic?: boolean }[];
   status: CallStatus;
   transcripts: { speaker: TranscriptEvent["speaker"]; text: string }[];
   result?: {
@@ -82,7 +81,6 @@ function upsertCall(calls: CallState[], call_id: string, patch: Partial<CallStat
         call_id,
         clinic: patch.clinic ?? call_id,
         meta: patch.meta,
-        graph: patch.graph,
         status: patch.status ?? "dialing",
         transcripts: patch.transcripts ?? [],
         result: patch.result,
@@ -116,7 +114,6 @@ function reduceOne(state: DashboardState, event: LiveEvent): DashboardState {
         ...state,
         calls: upsertCall(state.calls, e.call_id, {
           clinic: e.clinic,
-          graph: [{ label: "Clinic call", text: e.clinic }],
           meta: e.meta,
           status: "dialing",
           transcripts: [],
@@ -138,23 +135,15 @@ function reduceOne(state: DashboardState, event: LiveEvent): DashboardState {
       const transcripts = [...(existing?.transcripts ?? []), { speaker: e.speaker, text: e.text }];
       return {
         ...state,
-        calls: upsertCall(state.calls, e.call_id, {
-          transcripts,
-          graph: [...(existing?.graph ?? []), {
-            label: e.speaker === "clinic" ? "Clinic replied" : "Assistant spoke",
-            text: e.text, clinic: e.speaker === "clinic",
-          }],
-        }),
+        calls: upsertCall(state.calls, e.call_id, { transcripts }),
       };
     }
 
     case "call_result": {
       const e = event as CallResultEvent;
-      const existing = state.calls.find(call => call.call_id === e.call_id);
       return {
         ...state,
         calls: upsertCall(state.calls, e.call_id, {
-          graph: [...(existing?.graph ?? []), { label: "Offer received", text: `${e.slot} · ${e.price}` }],
           result: {
             price: e.price,
             slot: e.slot,
