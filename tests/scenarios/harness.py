@@ -275,7 +275,9 @@ class Lab:
         return {e["clinic"]: e["call_id"] for e in self.of_type(task_id, "call_start")}
 
     def twilio_sms(self, sender: str, body: str, message_sid: str, **extra):
-        """An inbound Twilio SMS as the form Twilio posts (docs/ARCHITECTURE.md, REST interface)."""
+        """An inbound SMS as the form Twilio posts (docs/ARCHITECTURE.md, REST interface), handled in SMS_MODE=mock: no
+        Twilio signature is attached, so these tests exercise the allowlist, matching and replay rules, not the live
+        signature check (integrations/tests covers that). The ElevenLabs post-call replay below is signed."""
         form = {"From": sender, "To": "+15555550000", "Body": body, "MessageSid": message_sid, **extra}
         return self.client.post("/api/webhooks/twilio/sms", data=form)
 

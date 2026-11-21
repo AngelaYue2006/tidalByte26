@@ -33,14 +33,24 @@ def pytest_collect_file(file_path: Path, parent):
     return None
 
 
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
+
+
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    """Mock mode means no socket leaves this process: not the raw utterance, not anything else (T2)."""
+    """Mock mode means no socket leaves this machine: not the raw utterance, not anything else (T2).
 
-    def refuse(*_args, **_kwargs):
-        raise AssertionError("a scenario test attempted network access; every adapter must be in mock mode")
+    Only a loopback address may connect: asyncio on Windows wires its event loop with an internal socket pair
+    (`socket.socketpair` falls back to a 127.0.0.1 connect there), and TestClient cannot start without it. Every other
+    address is refused, so a vendor SDK or a cloud model call fails the test instead of leaving the process."""
+    real_connect = socket.socket.connect
 
-    monkeypatch.setattr(socket.socket, "connect", refuse)
+    def loopback_only(sock, address, *args, **kwargs):
+        if isinstance(address, tuple) and address and address[0] in LOOPBACK_HOSTS:
+            return real_connect(sock, address, *args, **kwargs)
+        raise AssertionError(f"a scenario test attempted network access to {address!r}; every adapter must be in mock mode")
+
+    monkeypatch.setattr(socket.socket, "connect", loopback_only)
 
 
 @pytest.fixture
