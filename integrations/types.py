@@ -84,6 +84,7 @@ class Confirmation(Fact):
 
 class Booking(Fact):
     clinic: str
+    address: str | None = None
     slot_start: AwareDatetime
     slot_end: AwareDatetime
     price: str

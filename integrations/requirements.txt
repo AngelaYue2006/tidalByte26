@@ -7,3 +7,6 @@ httpx
 pydantic
 jsonschema
 pytest
+google-auth
+requests
+tzdata
