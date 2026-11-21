@@ -90,9 +90,17 @@ export default function LivePlaceholder() {
   }, [viewer.viewerId]);
 
   const rawState = useMemo(() => {
-    if (liveState && (liveState.calls.length > 0 || liveState.transport || liveState.decision)) {
-      return liveState;
-    }
+    // Prefer any real stream state (including request-only / taskId) over the fixture preview.
+    const hasLive =
+      !!liveState &&
+      (!!liveState.taskId ||
+        !!liveState.request ||
+        liveState.calls.length > 0 ||
+        !!liveState.transport ||
+        !!liveState.decision ||
+        !!liveState.approval ||
+        !!liveState.confirmations);
+    if (hasLive) return liveState!;
     if (previewAwaiting) return AWAITING_STATE;
     if (preview) return PREVIEW_STATE;
     return liveState ?? { calls: [] };

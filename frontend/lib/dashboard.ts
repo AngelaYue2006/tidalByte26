@@ -19,6 +19,7 @@ import type {
   TranscriptEvent,
   TransportCheckEvent,
 } from "@/lib/events";
+import { eventTaskId } from "@/lib/events";
 
 export type CallState = {
   call_id: string;
@@ -92,7 +93,14 @@ function upsertCall(calls: CallState[], call_id: string, patch: Partial<CallStat
   return next;
 }
 
+function withTaskId(state: DashboardState, event: LiveEvent): DashboardState {
+  // Live events carry task_id; without this, Approve/ride reply stay broken until a reconnect snapshot.
+  const taskId = eventTaskId(event);
+  return taskId && state.taskId !== taskId ? { ...state, taskId } : state;
+}
+
 function reduceOne(state: DashboardState, event: LiveEvent): DashboardState {
+  state = withTaskId(state, event);
   switch (event.type) {
     case "heartbeat":
       return state;
@@ -161,8 +169,8 @@ function reduceOne(state: DashboardState, event: LiveEvent): DashboardState {
         decision: {
           winner: e.winner,
           title: e.title,
-          reasons: e.reasons,
-          second: e.second,
+          reasons: e.reasons ?? [],
+          second: e.second ?? [],
           tradeoff: e.tradeoff,
         },
       };

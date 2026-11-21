@@ -67,4 +67,59 @@ describe("reduceDashboard with prototype SCENARIO", () => {
   it("starts from emptyDashboard", () => {
     expect(emptyDashboard()).toEqual({ calls: [] });
   });
+
+  it("picks up task_id from streamed events so Approve works before a reconnect", () => {
+    const state = foldEvents([
+      {
+        type: "task_updated",
+        status: "intake",
+        task_id: "task-live-1",
+        id: 1,
+      },
+      {
+        type: "request",
+        text: "dental cleaning",
+        chips: ["Dental cleaning"],
+        task_id: "task-live-1",
+        id: 2,
+      },
+      {
+        type: "decision",
+        winner: "task-live-1-a",
+        title: "Why Nemotron picked Bright Smile Dental",
+        reasons: ["Cheapest"],
+        second: ["2nd closest"],
+        tradeoff: "trade",
+        task_id: "task-live-1",
+        id: 3,
+      },
+      {
+        type: "approval_required",
+        pick: { clinic: "Bright Smile Dental", slot: "Thu 9:30", price: "$95" },
+        task_id: "task-live-1",
+        id: 4,
+      },
+    ]);
+    expect(state.taskId).toBe("task-live-1");
+    expect(state.request?.chips).toEqual(["Dental cleaning"]);
+    expect(state.decision?.second).toEqual(["2nd closest"]);
+    expect(state.approval?.pick.clinic).toBe("Bright Smile Dental");
+  });
+
+  it("tolerates a decision event missing second", () => {
+    const state = foldEvents([
+      {
+        type: "decision",
+        winner: "a",
+        title: "Why Nemotron picked X",
+        reasons: ["Fits"],
+        // @ts-expect-error intentional incomplete live payload
+        second: undefined,
+        tradeoff: "trade",
+        task_id: "t1",
+      },
+    ]);
+    expect(state.decision?.second).toEqual([]);
+    expect(state.taskId).toBe("t1");
+  });
 });
