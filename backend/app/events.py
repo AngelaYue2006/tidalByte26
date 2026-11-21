@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -18,6 +19,8 @@ from sqlmodel import Session, select
 
 from app.db import session_scope
 from app.models import Contact, Event, Task
+
+log = logging.getLogger(__name__)
 
 VISIBILITIES: tuple[str, ...] = ("owner", "contact", "internal")
 
@@ -39,6 +42,9 @@ EVENT_TYPES: tuple[str, ...] = (
     "ride_confirmed",
     "task_updated",
 )
+
+# Events whose `sms_user` is the owner's own text; projected away for the contact.
+OWNER_SMS_EVENTS: frozenset[str] = frozenset({"booked", "notified"})
 
 _ROLE_SEES: dict[str, frozenset[str]] = {
     "owner": frozenset({"owner", "contact"}),
@@ -74,6 +80,12 @@ def project_event(row: Event, role: str) -> dict:
             payload.pop("text", None)
         elif "text" in payload:
             visibility = "owner"
+    if role == "contact" and row.type in OWNER_SMS_EVENTS:
+        # The owner's text can carry price and insurance; the contact's scope is clinic, time, address and the ride need.
+        if row.type == "booked":
+            payload["sms_user"] = ""  # the schema requires the key
+        else:
+            payload.pop("sms_user", None)
     at = row.at if row.at.tzinfo is not None else row.at.replace(tzinfo=UTC)
     return {
         **payload,
@@ -123,7 +135,11 @@ class EventBus:
         for sub in subs:
             if sub.viewer.owner_id != owner_id or not visible_to(sub.viewer.role, row.visibility):
                 continue
-            sub.loop.call_soon_threadsafe(sub.queue.put_nowait, row.id)
+            try:
+                sub.loop.call_soon_threadsafe(sub.queue.put_nowait, row.id)
+            except RuntimeError:  # the subscriber's loop is gone; the stream it fed is over
+                self.unsubscribe(sub)
+                continue
             fed += 1
         return fed
 
@@ -146,8 +162,18 @@ def emit(engine: Engine, bus: EventBus, task_id: str, type: str, payload: dict, 
         session.flush()
         session.refresh(row)
         session.expunge(row)
-    bus.publish(row, owner_id)
+    _fan_out(bus, [row], owner_id)
     return row
+
+
+def _fan_out(bus: EventBus, rows: list[Event], owner_id: str) -> None:
+    """Wake subscribers for committed rows. The rows are authoritative: a fan-out error is logged, never raised, and the
+    stream picks the rows up on its next read past the cursor."""
+    for row in rows:
+        try:
+            bus.publish(row, owner_id)
+        except Exception:
+            log.exception("event %s of task %s was committed but not fanned out; the stream catches up on its next read", row.id, row.task_id)
 
 
 def emit_many(
@@ -185,8 +211,7 @@ def emit_many(
         for row in rows:
             session.refresh(row)
             session.expunge(row)
-    for row in rows:
-        bus.publish(row, owner_id)
+    _fan_out(bus, rows, owner_id)
     return rows
 
 

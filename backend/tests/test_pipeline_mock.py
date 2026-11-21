@@ -166,11 +166,21 @@ def test_t1_standard_run_produces_the_full_event_sequence(client):
     contact_request = next(e for e in events(client, task_id) if e["type"] == "contact_request")
     assert contact_request["contact"] == "Sarah" and "Bright Smile Dental" in contact_request["message"] and "123 Main St" in contact_request["message"]
     assert "knee" not in contact_request["message"] and "DEMO" not in contact_request["message"]
-    # the contact view: same trail, never the raw text
+    # the contact view: same trail, never the raw text, never the owner's SMS text (price and insurance)
     contact_seq = events(client, task_id, viewer="sarah")
     assert [e["type"] for e in contact_seq if e["type"] not in voice_types] == T1_SEQUENCE
     assert all("text" not in e for e in contact_seq if e["type"] == "request")
     assert DEMO_TEXT not in str(contact_seq)
+    owner_booked = next(e for e in events(client, task_id) if e["type"] == "booked")
+    contact_booked = next(e for e in contact_seq if e["type"] == "booked")
+    assert "$95" in owner_booked["sms_user"] and "Delta" in owner_booked["sms_user"]
+    assert contact_booked["sms_user"] == "" and contact_booked["calendar"] == owner_booked["calendar"]
+    owner_notified = next(e for e in events(client, task_id) if e["type"] == "notified")
+    contact_notified = next(e for e in contact_seq if e["type"] == "notified")
+    assert owner_notified["sms_user"] and "sms_user" not in contact_notified and contact_notified["sms_contact"] == owner_notified["sms_contact"]
+    assert "$95" not in json.dumps(contact_seq) or all("$95" not in json.dumps({k: v for k, v in e.items() if k.startswith("sms")}) for e in contact_seq)
+    for event in contact_seq:
+        EVENTS_VALIDATOR.validate({k: v for k, v in event.items() if k != "id"})
     # the snapshot after the run restores the trail (T11 shape) and every representation uses the same call ids
     with client.stream("GET", "/api/live?viewer_id=mary") as resp:
         first = next(line for line in resp.iter_lines() if line.startswith("data: "))
@@ -379,3 +389,74 @@ def test_failed_reject_write_keeps_the_task_awaiting_and_retry_cancels(client, m
     assert client.get(f"/api/tasks/{task_id}?viewer_id=mary").json()["status"] == "awaiting_approval", "the status change rolled back with the event"
     assert client.post(f"/api/tasks/{task_id}/approve?viewer_id=mary", json={"actor_id": "mary", "decision": "reject", "idempotency_key": "r"}).json()["status"] == "cancelled"
     wait_for(client, task_id, "cancelled")
+
+
+def test_publish_failure_after_commit_keeps_the_event_and_never_duplicates(client, monkeypatch):
+    """Fan-out is not persistence: a publish error after the commit leaves the approval applied and the retry a replay."""
+    from app import events as events_module
+
+    task_id = start(client)
+    wait_for(client, task_id, "awaiting_approval")
+    real_publish = events_module.EventBus.publish
+    calls = {"n": 0}
+
+    def flaky_publish(self, row, owner_id):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("subscriber loop closed")
+        return real_publish(self, row, owner_id)
+
+    monkeypatch.setattr(events_module.EventBus, "publish", flaky_publish)
+    first = client.post(f"/api/tasks/{task_id}/approve?viewer_id=mary", json={"actor_id": "mary", "decision": "approve", "idempotency_key": "p"})
+    assert first.status_code == 200 and first.json() == {"status": "approved", "applied": True}, "committed events are authoritative"
+    again = client.post(f"/api/tasks/{task_id}/approve?viewer_id=mary", json={"actor_id": "mary", "decision": "approve", "idempotency_key": "p"})
+    assert again.json() == first.json()
+    wait_for(client, task_id, "awaiting_contact")
+    assert [e["type"] for e in events(client, task_id)].count("approved") == 1
+    # the stream still carries the committed approval: the heartbeat tick reads past the cursor
+    monkeypatch.setattr(events_module.EventBus, "publish", lambda self, row, owner_id: (_ for _ in ()).throw(RuntimeError("down")))
+    with client.stream("GET", "/api/live?viewer_id=mary") as resp:
+        lines = resp.iter_lines()
+        snapshot_line = next(line for line in lines if line.startswith("data: "))
+        assert "approved" in snapshot_line
+        client.post("/api/contacts/offers?viewer_id=sarah", json={"task_id": task_id, "contact_id": "sarah", "offer": {"can_drive": True}, "idempotency_key": "r"})
+        seen = []
+        for line in lines:
+            if line.startswith("data: "):
+                payload = json.loads(line[6:])
+                if payload["type"] != "heartbeat":
+                    seen.append(payload["type"])
+                if "ride_confirmed" in seen:
+                    break
+    assert "contact_reply" in seen and "ride_confirmed" in seen, "delivered with no publish at all, via the catch-up read"
+
+
+def test_refused_sms_is_reported_to_the_owner_and_never_shown_as_sent(monkeypatch, tmp_path):
+    from integrations import sms_twilio
+
+    real_send = sms_twilio.send
+
+    def refuse_owner(to, text, key):
+        if to == "+15555550100":
+            raise RuntimeError("UNVERIFIED_SENDER: phone is not on the demo allowlist")
+        return real_send(to, text, key)
+
+    client, _voice = make_client(monkeypatch, tmp_path)
+    client.app.state.pipeline.deps.sms_send = refuse_owner
+    try:
+        task_id = start(client)
+        wait_for(client, task_id, "awaiting_approval")
+        client.post(f"/api/tasks/{task_id}/approve?viewer_id=mary", json={"actor_id": "mary", "decision": "approve", "idempotency_key": "ok"})
+        task = wait_for(client, task_id, "awaiting_contact")
+        assert task["booking"]["status"] == "confirmed" and task["booking"]["calendar_event_id"], "the calendar receipt stands on its own"
+        booked = next(e for e in events(client, task_id) if e["type"] == "booked")
+        assert booked["sms_user"] == "" and booked["calendar"].startswith("Appointment"), "no text claimed as sent"
+        failures = [e for e in events(client, task_id) if e["type"] == "task_updated" and e.get("reason") == "SMS_NOT_SENT"]
+        assert len(failures) >= 2 and all(e["visibility"] == "owner" and "allowlist" in e["message"] for e in failures)
+        assert not [e for e in events(client, task_id, viewer="sarah") if e.get("reason") == "SMS_NOT_SENT"]
+        client.post("/api/contacts/offers?viewer_id=sarah", json={"task_id": task_id, "contact_id": "sarah", "offer": {"can_drive": True}, "idempotency_key": "r"})
+        wait_for(client, task_id, "completed")
+        notified = next(e for e in events(client, task_id) if e["type"] == "notified")
+        assert notified["sms_user"] == "" and notified["sms_contact"].startswith("LifeLine:"), "the contact's receipt is shown, the owner's refusal is not faked"
+    finally:
+        client.__exit__(None, None, None)

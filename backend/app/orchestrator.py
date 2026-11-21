@@ -268,7 +268,8 @@ class Pipeline:
             payload = {"calendar": "", "sms_user": texts.tentative_sms(winner.clinic, winner.slot_start), "tentative": True, "simulated": confirmation.simulated}
         with session_scope(self.engine) as session:
             session.get(Task, run.task_id).booking_json = json.dumps(booking_record(run.booking))
-        self._sms(run, run.owner.phone_e164, payload["sms_user"], "booked")
+        receipt = self._sms(run, run.owner.phone_e164, payload["sms_user"], "booked")
+        payload["sms_user"] = receipt.text if receipt else ""  # only a text the adapter accepted is shown as sent
         self._emit(run, "booked", payload, "contact")
 
     def _transport(self, run: Run) -> bool:
@@ -312,10 +313,13 @@ class Pipeline:
         else:
             sms_user = texts.booked_sms(winner.clinic, winner.slot_start, winner.price, run.intake.insurance_carrier)
             sms_contact = texts.no_ride_needed_sms_contact(first, winner.clinic, winner.slot_start, spec.clinic.address)
-        self._sms(run, run.owner.phone_e164, sms_user, "final_owner")
-        if contact_phone:
-            self._sms(run, contact_phone, sms_contact, "final_contact")
-        self._emit(run, "notified", {"sms_contact": sms_contact, "sms_user": sms_user, "simulated": True}, "contact")
+        owner_receipt = self._sms(run, run.owner.phone_e164, sms_user, "final_owner")
+        contact_receipt = self._sms(run, contact_phone, sms_contact, "final_contact") if contact_phone else None
+        self._emit(run, "notified", {
+            "sms_contact": contact_receipt.text if contact_receipt else "",
+            "sms_user": owner_receipt.text if owner_receipt else "",
+            "simulated": bool((owner_receipt and owner_receipt.simulated) or (contact_receipt and contact_receipt.simulated)),
+        }, "contact")
         self._set_status(run, "completed")
 
     # ---- plumbing -------------------------------------------------------------------------------------------------
@@ -350,14 +354,18 @@ class Pipeline:
     def _emit(self, run: Run, type_: str, payload: dict, visibility: str) -> None:
         emit(self.engine, self.bus, run.task_id, type_, payload, visibility)
 
-    def _sms(self, run: Run, to: str, text: str, step: str) -> None:
-        """Keyed by task and step: the mock returns the same receipt for a repeat, and live Twilio will too (#24)."""
+    def _sms(self, run: Run, to: str, text: str, step: str):
+        """Send one text, keyed by task and step (the mock returns the same receipt for a repeat; live Twilio will too, #24).
+
+        Returns the MessageReceipt, or None when the adapter refused: that is reported to the owner as a
+        `task_updated` with reason `SMS_NOT_SENT`, and the text is never shown as sent (status from receipts).
+        """
         try:
-            self.deps.sms_send(to, text, f"{run.task_id}:{step}")
+            return self.deps.sms_send(to, text, f"{run.task_id}:{step}")
         except (RuntimeError, OSError, ValueError) as exc:  # the adapters raise plain, readable errors
-            # An SMS that cannot be sent (number not on the allowlist, vendor down) is reported, never faked.
             log.warning("sms %s for task %s not sent: %s", step, run.task_id, exc)
-            self._emit(run, "task_updated", {"status": self._status(run), "reason": "SMS_NOT_SENT", "message": str(exc)}, "internal")
+            self._emit(run, "task_updated", {"status": self._status(run), "reason": "SMS_NOT_SENT", "message": f"{step}: {exc}"}, "owner")
+            return None
 
     def _now(self, run: Run) -> datetime:
         return self.deps.now() if self.deps.now else datetime.now(ZoneInfo(run.owner.timezone))
