@@ -15,8 +15,14 @@ def _load(blob: str | None) -> object | None:
     return json.loads(blob) if blob else None
 
 
+CALL_RESULT_KEYS = ("price", "slot", "insured", "slotOk")  # shared/task.schema.json call_result
+
+
 def call_projection(call: Call, meta: str | None = None) -> dict:
-    result = _load(call.result_json)
+    """calls.result_json also carries the structured facts for ranking (price_usd, slot_start, slot_end, source);
+    the card gets the four display fields the schema allows."""
+    stored = _load(call.result_json)
+    result = {k: stored[k] for k in CALL_RESULT_KEYS if k in stored} if isinstance(stored, dict) else None
     return {
         "call_id": call.id,
         "clinic": call.clinic_name,

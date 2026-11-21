@@ -12,7 +12,7 @@ from app import session
 from app.config import Settings, load_settings
 from app.db import init_db, make_engine
 from app.events import EventBus
-from app.routers import demo, live, tasks
+from app.routers import demo, live, tasks, webhooks
 
 VERSION = "0.1.0"
 
@@ -40,6 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(session.router)
     app.include_router(live.router)
     app.include_router(tasks.router)
+    app.include_router(webhooks.router)
     return app
 
 
