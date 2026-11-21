@@ -26,14 +26,15 @@ export default function DecisionCard({
   taskId,
 }: DecisionCardProps) {
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const needsApproval = !!approval?.pick && !approval.approved;
-  const showButtons = viewer.role === "owner" && needsApproval;
+  const showButtons = viewer.role === "owner" && needsApproval && !sent;
   const approved = approval?.approved;
 
   async function send(decisionValue: "approve" | "reject") {
-    if (!taskId || busy) return;
+    if (!taskId || busy || sent) return;
     setBusy(true);
     setError(null);
     try {
@@ -42,6 +43,7 @@ export default function DecisionCard({
         decision: decisionValue,
         idempotency_key: newKey(),
       });
+      setSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send approval");
     } finally {
