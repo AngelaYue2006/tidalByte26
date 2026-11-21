@@ -78,3 +78,34 @@ def test_oauth_exception_text_is_not_printed(consent, monkeypatch, capsys):
     monkeypatch.setattr(setup.InstalledAppFlow, "from_client_config", fail)
     assert setup.main() == 1
     assert "sensitive-callback-code-and-token" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("failure", ["refresh", "http", "calendar"])
+def test_failed_verification_preserves_existing_token(
+    consent, monkeypatch, capsys, failure
+):
+    path, credentials = consent
+    before = path.read_bytes()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("sensitive-refresh-or-calendar-failure")
+
+    if failure == "refresh":
+        credentials.refresh = fail
+    elif failure == "http":
+        monkeypatch.setattr(setup.urllib.request, "urlopen", fail)
+    else:
+        monkeypatch.setattr(
+            setup.urllib.request,
+            "urlopen",
+            lambda *a, **k: io.BytesIO(
+                json.dumps(
+                    {"calendars": {"primary": {"errors": [{"reason": "notFound"}]}}}
+                ).encode()
+            ),
+        )
+    assert setup.main() == 1
+    assert path.read_bytes() == before
+    output = capsys.readouterr().out
+    assert "saved to the local" not in output
+    assert "sensitive-refresh-or-calendar-failure" not in output

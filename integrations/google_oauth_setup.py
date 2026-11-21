@@ -77,11 +77,6 @@ def main():
         if not token or not re.fullmatch(r"[A-Za-z0-9._~+/=-]+", token):
             print("No usable refresh token returned; .env left unchanged.")
             return 1
-        # set_key re-reads the current file, retaining unrelated settings such as Maps.
-        set_key(str(path), "GOOGLE_REFRESH_TOKEN", token, quote_mode="never")
-        print(
-            "Refresh token saved to the local .env without displaying it.", flush=True
-        )
         credentials.refresh(Request())
         print("Refresh-token exchange: succeeded.", flush=True)
         now = datetime.now(UTC)
@@ -109,6 +104,11 @@ def main():
             return 1
         print(
             "Calendar free/busy query: succeeded. No event details printed or events created."
+        )
+        # set_key re-reads the current file, retaining unrelated settings such as Maps.
+        set_key(str(path), "GOOGLE_REFRESH_TOKEN", token, quote_mode="never")
+        print(
+            "Refresh token saved to the local .env without displaying it.", flush=True
         )
         return 0
     except urllib.error.HTTPError as error:
