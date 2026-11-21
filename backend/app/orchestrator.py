@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Engine
 from sqlmodel import Session
 
-from app import texts
+from app import receipts, texts
 from app.adapters import Deps
 from app.db import session_scope
 from app.events import EventBus, emit
@@ -28,7 +28,16 @@ from app.nemotron.types import IntakeRequest, UserRecord
 from app.people import ensure_contacts, load_owner
 from app.ranking import hard_rules, money, no_eligible_offer, slot_label
 from app.state import transition
-from integrations.types import Booking, CallSpec, Clinic, Offer, Window
+from integrations.types import (
+    Booking,
+    CalendarReceipt,
+    CallSpec,
+    Clinic,
+    Confirmation,
+    MessageReceipt,
+    Offer,
+    Window,
+)
 from integrations.types import IntakeRequest as WireIntakeRequest
 
 log = logging.getLogger(__name__)
@@ -76,9 +85,7 @@ class Pipeline:
         self._waits: dict[str, asyncio.Event] = {}
         self._claimed: set[str] = set()
         self._tasks: dict[str, asyncio.Task] = {}
-        # Idempotency, in process until #24 persists receipts: request keys -> task id, and per-route replies by key.
-        self.request_keys: dict[str, str] = {}
-        self.replies: dict[tuple[str, str, str], dict] = {}
+        # Idempotency lives in the receipts table (#24): request keys and per-route replies survive a restart.
 
     # ---- entry points -------------------------------------------------------------------------------------------
 
@@ -113,11 +120,35 @@ class Pipeline:
         return task_id in self._waits and task_id not in self._claimed
 
     def replay(self, route: str, task_id: str, key: str) -> dict | None:
-        return self.replies.get((route, task_id, key))
+        """The reply already given for this (route, task, key), or None. Persisted, so a retry after a restart matches."""
+        receipt = receipts.find(self.engine, task_id, f"reply:{route}:{key}")
+        return receipts.payload_of(receipt) if receipt else None
 
     def remember(self, route: str, task_id: str, key: str, response: dict) -> dict:
-        self.replies[(route, task_id, key)] = response
+        receipts.record(self.engine, task_id, f"reply:{route}:{key}", "reply", response)
         return response
+
+    def task_for_request_key(self, key: str) -> str | None:
+        """POST /api/requests idempotency: the task a key already created, or None."""
+        receipt = receipts.find_by_step(self.engine, f"request:{key}")
+        return receipt.task_id if receipt else None
+
+    def remember_request_key(self, key: str, task_id: str) -> None:
+        receipts.record(self.engine, task_id, f"request:{key}", "request", {"task_id": task_id})
+
+    def reset(self) -> int:
+        """Stop every running pipeline task and forget every wait: POST /api/demo/reset wipes the tables underneath."""
+        stopped = 0
+        for task in list(self._tasks.values()):
+            if not task.done():
+                task.cancel()
+                stopped += 1
+        self._tasks.clear()
+        for event in self._waits.values():
+            event.set()
+        self._waits.clear()
+        self._claimed.clear()
+        return stopped
 
     # ---- the ten steps -------------------------------------------------------------------------------------------
 
@@ -250,7 +281,12 @@ class Pipeline:
         winner = run.winner
         spec = run.specs[winner.call_id]
         slot = {"slot_start": winner.slot_start.isoformat(), "slot_end": winner.slot_end.isoformat()}
-        confirmation = self.deps.voice.confirm_booking(spec, slot)
+        confirmed, _ = receipts.once(
+            self.engine, run.task_id, "booking:confirm", "booking",
+            lambda: self.deps.voice.confirm_booking(spec, slot),
+            external_id=lambda c: c.confirmation_ref,
+        )
+        confirmation = Confirmation.model_validate(confirmed)
         if confirmation.status == "rejected":
             raise PipelineFailure("BOOKING_REJECTED", f"{winner.clinic} did not confirm the appointment: {confirmation.evidence}")
         address = spec.clinic.address
@@ -260,7 +296,12 @@ class Pipeline:
             booking_fields["address"] = address
         run.booking = Booking(**booking_fields)
         if confirmation.status == "confirmed":
-            receipt = self.deps.create_event(run.owner.id, run.booking, f"{run.task_id}:calendar")  # once, keyed by task
+            stored, _ = receipts.once(  # once per task: a retry finds the receipt and never inserts a second event
+                self.engine, run.task_id, "calendar", "calendar",
+                lambda: self.deps.create_event(run.owner.id, run.booking, f"{run.task_id}:calendar"),
+                external_id=lambda r: r.event_id,
+            )
+            receipt = CalendarReceipt.model_validate(stored)
             run.booking = run.booking.model_copy(update={"calendar_event_id": receipt.event_id})
             payload = {"calendar": texts.calendar_card(winner.slot_start, winner.slot_end, address),
                        "sms_user": texts.booked_sms(winner.clinic, winner.slot_start, winner.price, run.intake.insurance_carrier), "simulated": receipt.simulated}
@@ -355,13 +396,18 @@ class Pipeline:
         emit(self.engine, self.bus, run.task_id, type_, payload, visibility)
 
     def _sms(self, run: Run, to: str, text: str, step: str):
-        """Send one text, keyed by task and step (the mock returns the same receipt for a repeat; live Twilio will too, #24).
+        """Send one text, keyed by task and step: the receipts table makes a repeat of the step return the first receipt (#24).
 
         Returns the MessageReceipt, or None when the adapter refused: that is reported to the owner as a
         `task_updated` with reason `SMS_NOT_SENT`, and the text is never shown as sent (status from receipts).
         """
         try:
-            return self.deps.sms_send(to, text, f"{run.task_id}:{step}")
+            stored, _ = receipts.once(  # one text per (task, step); a repeat of the step returns the first receipt
+                self.engine, run.task_id, f"sms:{step}", "sms",
+                lambda: self.deps.sms_send(to, text, f"{run.task_id}:{step}"),
+                external_id=lambda r: r.message_id,
+            )
+            return MessageReceipt.model_validate(stored)
         except (RuntimeError, OSError, ValueError) as exc:  # the adapters raise plain, readable errors
             log.warning("sms %s for task %s not sent: %s", step, run.task_id, exc)
             self._emit(run, "task_updated", {"status": self._status(run), "reason": "SMS_NOT_SENT", "message": f"{step}: {exc}"}, "owner")
