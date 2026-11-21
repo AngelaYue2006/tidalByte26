@@ -2,6 +2,7 @@
 
 import io
 import json
+import logging
 import sys
 from types import SimpleNamespace
 
@@ -109,3 +110,13 @@ def test_failed_verification_preserves_existing_token(
     output = capsys.readouterr().out
     assert "saved to the local" not in output
     assert "sensitive-refresh-or-calendar-failure" not in output
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_setup_restores_logging_after_success_or_failure(consent, fails):
+    _, credentials = consent
+    previous = logging.root.manager.disable
+    if fails:
+        credentials.refresh_token = None
+    assert setup.main() == (1 if fails else 0)
+    assert logging.root.manager.disable == previous
