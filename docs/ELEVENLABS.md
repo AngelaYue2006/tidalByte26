@@ -59,7 +59,7 @@ The agent places calls from a Twilio number that ElevenLabs holds; `ELEVENLABS_P
 
 The import failed at step 5 with ElevenLabs' error that the number was **"not found in your Twilio account as either an incoming number or verified caller ID."** The cause is on the Twilio side, not a typo: the team's Twilio account is a new-style trial. Its Console **Phone Numbers inventory is empty** and says to upgrade to purchase numbers, and the classic API agrees (`IncomingPhoneNumbers` and `OutgoingCallerIds` both return zero; see PR #79). The number Twilio lets a trial send from is a shared trial sender that exists only in the Console's "Try out SMS" dialog. ElevenLabs looks the number up as an `IncomingPhoneNumber` or a verified caller ID of the account, finds neither, and refuses. The same trial also sends only Twilio's predefined SMS templates (PR #79), so this is one limitation with two faces: no owned number, no custom text.
 
-### The two paths (owner decision, open)
+### The two paths (decided 2026-11-21: path one, upgrade and buy)
 
 | Path | What it takes | What it gives |
 |---|---|---|
@@ -72,7 +72,7 @@ The import failed at step 5 with ElevenLabs' error that the number was **"not fo
 - **Import succeeded** with the steps above, Enable inbound SMS **OFF**. The number is assigned to the `LifeLine` agent.
 - **Recorded in the root `.env` only:** the new `TWILIO_PHONE_NUMBER` and `ELEVENLABS_PHONE_NUMBER_ID`. They exist; their values appear nowhere else.
 - **Webhooks on the number, Twilio Console:** "A message comes in" → `PUBLIC_BASE_URL/api/webhooks/twilio/sms`, HTTP POST (our backend, so a YES or a contact's reply still reaches us); "A call comes in" → ElevenLabs' inbound-call URL, set by the import. Do not point the voice webhook back at the backend; the agent answers calls.
-- **Still open:** one test call from the ElevenLabs dashboard to an allowlisted teammate phone, with the post-call webhook firing at `PUBLIC_BASE_URL/api/webhooks/elevenlabs/post-call` (#21 is on main, so a 200 is expected). It runs when the owner okays it; the outcome goes here and into #67.
+- **Test call, 2026-11-21 about 23:06 UTC:** one outbound call placed from the ElevenLabs dashboard (Telephony → the imported number → Outbound call) to the owner's allowlisted phone. It rang, the `LifeLine` agent spoke, the owner answered; the ElevenLabs conversation history shows duration 7 s, 2 messages, status Successful. **The post-call webhook was not verified in this run:** the backend was not running on :8000 at the time, so the tunnel had nothing to deliver to. The webhook handler itself is covered by #73's tests on main (`backend/tests/test_post_call_webhook.py`); the first live delivery is #26's to record.
 
 The trial finding above stays as history: a new-style Twilio trial cannot be imported into ElevenLabs and cannot send custom text, so a team that wants live calls must upgrade before kickoff ends.
 
