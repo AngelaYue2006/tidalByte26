@@ -15,7 +15,16 @@ from app.db import init_db, make_engine
 from app.events import EventBus
 from app.nemotron import local_intake
 from app.orchestrator import Pipeline
-from app.routers import approvals, contacts, demo, live, requests, tasks, webhooks
+from app.routers import (
+    approvals,
+    contacts,
+    demo,
+    live,
+    llm_proxy,
+    requests,
+    tasks,
+    webhooks,
+)
 
 VERSION = "0.1.0"
 
@@ -50,6 +59,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     app.include_router(approvals.router)
     app.include_router(contacts.router)
     app.include_router(webhooks.router)
+    app.include_router(llm_proxy.router)
     return app
 
 
