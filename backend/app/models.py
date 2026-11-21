@@ -1,11 +1,14 @@
-"""ORM models for tasks, contacts, calls, turns, events. Mirrors docs/ARCHITECTURE.md, Data model."""
+"""ORM models for tasks, contacts, calls, turns, events, receipts. Mirrors docs/ARCHITECTURE.md, Data model."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
+
+TURNS_UNIQUE_INDEX = "uq_turns_call_seq"  # also applied to pre-existing databases by db.init_db
 
 
 def new_id() -> str:
@@ -59,6 +62,7 @@ class Call(SQLModel, table=True):
 
 class Turn(SQLModel, table=True):
     __tablename__ = "turns"
+    __table_args__ = (Index(TURNS_UNIQUE_INDEX, "call_id", "seq", unique=True),)  # one line per position per call
 
     id: str = Field(default_factory=new_id, primary_key=True)
     call_id: str = Field(foreign_key="calls.id", index=True)
@@ -79,4 +83,23 @@ class Event(SQLModel, table=True):
     at: datetime = Field(default_factory=now)
 
 
-TABLES: tuple[str, ...] = ("tasks", "contacts", "calls", "turns", "events")
+class Receipt(SQLModel, table=True):
+    """One external side effect or one idempotent reply, keyed by task and step (docs/ARCHITECTURE.md, Data model).
+
+    `step` is unique per task ("sms:approval", "calendar", "booking:confirm", "reply:approve:<key>", "request:<key>");
+    the row is written in the same moment the effect happens, so a retry finds it and does nothing twice.
+    """
+
+    __tablename__ = "receipts"
+    __table_args__ = (Index("uq_receipts_task_step", "task_id", "step", unique=True),)
+
+    id: str = Field(default_factory=new_id, primary_key=True)
+    task_id: str = Field(foreign_key="tasks.id", index=True)
+    step: str = Field(index=True)
+    kind: str  # sms | calendar | booking | reply | request
+    external_id: str | None = None  # the adapter's id: message id, calendar event id, confirmation ref
+    payload_json: str = "{}"  # what the effect returned, replayed to a retry
+    at: datetime = Field(default_factory=now)
+
+
+TABLES: tuple[str, ...] = ("tasks", "contacts", "calls", "turns", "events", "receipts")

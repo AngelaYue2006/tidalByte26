@@ -11,7 +11,7 @@ flowchart TD
     B -- SSE: live events --> D
     B --> N1[Nemotron Nano, local via Ollama]
     B --> N2[NVIDIA API: Lightning, Super]
-    B --> G[Google Calendar, Places, Distance Matrix]
+    B --> G[Google Calendar, Places, Routes API]
     B --> E[ElevenLabs Agents]
     E <--> T[Twilio Voice] <--> C[3 clinic phones, teammates]
     E -- custom LLM --> B
@@ -49,7 +49,7 @@ Deterministic, in this order. Each step writes an event; the task status is the 
 1. `intake` — Nano → `IntakeRequest`. Emit `request`.
 2. `calendar` — `calendar.free_windows()` for the requested range.
 3. `places` — `places.find_clinics()` top 3, then `distance.drive()` from the owner's home. Emit `call_start` ×3 with distance meta.
-4. `calling` — `voice.start_call()` ×3 in parallel. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`.
+4. `calling` — `voice.start_call()` ×3 in parallel. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`. Mock and simulator lines take the same recorder (`llm_proxy.record_turn`, one `turns` row and one `transcript` event per `(call_id, seq)`), labelled `simulated: true`.
 5. `ranking` — `ranking.hard_rules()` drops offers over budget, outside free windows, or not insured. `ranker.rank()` (Super) scores the rest. Emit `decision`. If nothing survives, status `failed` with reason, emit `task_updated`, notify both, stop.
 6. `awaiting_approval` — SMS the owner the pick. Emit `approval_required`. Wait for `POST /api/tasks/{id}/approve` or SMS `YES`. Timeout: one reminder, then stay waiting.
 7. `booking` — `voice.confirm_booking()` (a short call-back, or the mock) returns `Confirmation`. Only on `confirmed`: `calendar.create_event()` once, keyed by task id. Emit `booked`. On `tentative`: emit `booked` with `tentative: true` and no calendar event.
@@ -64,10 +64,13 @@ Deterministic, in this order. Each step writes an event; the task status is the 
 `calls`: `{id, task_id, clinic_name, clinic_phone, distance_mi, status, result_json, external_ref, started_at, ended_at}` — `external_ref` is the ElevenLabs conversation id.
 `turns`: `{id, call_id, seq, speaker, text, at}` — speaker is `agent` or `clinic`. Text only.
 `events`: `{id, task_id, type, payload_json, visibility, at}` — visibility `owner`, `contact` or `internal`.
+`receipts`: `{id, task_id, step, kind, external_id, payload_json, at}` — unique on `(task_id, step)`. One row per external side effect (`sms:<step>`, `booking:confirm`, `calendar`; `external_id` is the message id, confirmation ref or calendar event id) and per idempotent reply (`reply:<route>:<key>` for approve and contact offers, `request:<key>` for `POST /api/requests`). `payload_json` is what the effect returned and is replayed to a retry.
 
 Task statuses: `intake`, `calendar`, `places`, `calling`, `ranking`, `awaiting_approval`, `booking`, `transport`, `awaiting_contact`, `completed`, `failed`, `cancelled`.
 
-Every external side effect (SMS, booking, calendar insert) is keyed by `task_id` plus step name and is skipped if a receipt already exists.
+Every external side effect (SMS, booking, calendar insert) is keyed by `task_id` plus step name and is skipped if a receipt already exists (`app/receipts.py`, `once()`): the row is written right after the effect succeeds, a failed effect leaves none, and two concurrent attempts race on the unique index so one receipt survives and both callers get it. Receipts persist across restarts, so a retried `POST` after a restart gets the same reply.
+
+`POST /api/demo/reset` (development only) cancels every running pipeline, wipes all six tables, reseeds the contacts from `backend/fixtures/users.json` and two finished runs from `backend/fixtures/past_runs.json` for the history page, then tells every open `GET /api/live` stream to start over with a fresh `snapshot` (event ids restart after a wipe, so a cursor from before the reset is meaningless).
 
 ## REST interface (v1)
 
@@ -80,13 +83,14 @@ Every external side effect (SMS, booking, calendar insert) is keyed by `task_id`
 | `POST` | `/api/tasks/{id}/approve` | `{actor_id, decision: "approve" or "reject", idempotency_key}` | owner only |
 | `POST` | `/api/contacts/offers` | `{task_id, contact_id, offer: {can_drive, pickup_time?}, idempotency_key}` | contact's dashboard reply |
 | `GET` | `/api/live` | `?viewer_id` | **SSE**: `snapshot` then events; viewer-scoped |
+| `GET` | `/api/session` | — | sets the `lifeline_session` cookie; the dashboard calls it once before any read |
 | `POST` | `/v1/chat/completions` | OpenAI chat format from ElevenLabs | custom LLM proxy to Lightning; streams; logs turns |
 | `POST` | `/api/webhooks/elevenlabs/post-call` | ElevenLabs payload | transcript + data collection → `call_result` |
 | `POST` | `/api/webhooks/twilio/sms` | Twilio form | signature check, allowlist, match `YES` or contact reply to the open task |
-| `POST` | `/api/demo/reset` | — | `APP_ENV=development` only; clears and reseeds |
+| `POST` | `/api/demo/reset` | — | `APP_ENV=development` only (403 otherwise); stops pipelines, clears every table, reseeds contacts and two past runs; returns `{stopped, cleared, seeded}` |
 | `GET` | `/api/health` | — | adapter modes and versions, no secrets |
 
-Auth for the hackathon: one shared dashboard session cookie, `viewer_id` chosen on a role picker. Not production identity.
+Auth for the hackathon: one shared dashboard session cookie, `viewer_id` chosen on a role picker. Not production identity. `GET /api/session` issues `lifeline_session`, an HMAC-signed token under `DASHBOARD_SESSION_SECRET` (HttpOnly, SameSite=Lax); `GET /api/live` and `GET /api/tasks/{id}/events` answer 401 without a valid one. In development with no secret set the app signs with a random per-process secret.
 
 ## Live events (SSE) — the dashboard contract
 
@@ -96,7 +100,7 @@ The prototype `frontend/prototype/index.html` renders the first eight exactly as
 { type: "request", text, chips: [..] }                       // chip starting with "!" renders green
 { type: "call_start", call_id, clinic, meta }                // meta: "1.2 mi · 6 min"
 { type: "call_status", call_id, status: "dialing"|"live"|"hold"|"done" }
-{ type: "transcript", call_id, speaker: "agent"|"clinic", text }
+{ type: "transcript", call_id, seq, speaker: "agent"|"clinic", text }   // seq: 1-based position in the call; mock lines carry simulated: true
 { type: "call_result", call_id, price, slot, insured, slotOk }
 { type: "decision", winner, title, reasons: [..], second: [..], tradeoff }
 { type: "booked", calendar, sms_user, tentative? }
@@ -112,16 +116,16 @@ The prototype `frontend/prototype/index.html` renders the first eight exactly as
 { type: "heartbeat" }                                        // every 15 s
 ```
 
-SSE details: `id:` increases per owner; the client ignores ids already applied. Headers `Cache-Control: no-cache`, `X-Accel-Buffering: no`. `LIVE_STREAM_MODE=poll` makes the dashboard poll `GET /api/tasks/{id}/events` once a second instead.
+SSE details: `id:` is the events-table id and increases per owner; the `snapshot` carries the id of the last event it contains; the client ignores ids already applied. Headers `Cache-Control: no-cache`, `X-Accel-Buffering: no`. `LIVE_STREAM_MODE=poll` makes the dashboard poll `GET /api/tasks/{id}/events` once a second instead.
 
-**Visibility:** `request.text` and the raw intake are `owner` only; the contact view receives `request` with chips but no text. `transcript` events are visible to both roles because the agent only ever speaks redacted facts. `contact_request` and `contact_reply` are visible to both.
+**Visibility:** an event's `visibility` is `owner` (the owner only), `contact` (both roles) or `internal` (no dashboard). A viewer whose id is a row in `contacts` is that owner's contact; any other viewer id is an owner and sees its own tasks. `request.text` and the raw intake are `owner` only: the `request` event is emitted with `contact` visibility and the backend strips `text` for the contact viewer, so the contact view receives `request` with chips but no text. `transcript` events are visible to both roles because the agent only ever speaks redacted facts. `contact_request` and `contact_reply` are visible to both.
 
 ## Adapter contracts (integrations/)
 
 ```python
 # nemotron (backend/app/nemotron/)
 local_intake.redact(utterance: str, user: UserRecord) -> IntakeRequest
-local_intake.contact_message(task: Task, contact: Contact) -> str
+local_intake.contact_message(owner: UserRecord, intake: IntakeRequest, facts: ContactFacts, *, relationship, request_text, template, model) -> ContactMessage  # on device; text checked, template fallback
 ranker.rank(offers: list[Offer], windows: list[Window], priority: str) -> Decision
 
 # integrations/
@@ -165,6 +169,7 @@ APP_TIMEZONE=America/Chicago
 DATABASE_URL=sqlite:///./lifeline.db
 PUBLIC_BASE_URL=            # ngrok https URL for webhooks and the LLM proxy
 LLM_PROXY_SECRET=           # shared with the ElevenLabs agent config
+DASHBOARD_SESSION_SECRET=   # signs the lifeline_session cookie; random per process in development when empty
 NVIDIA_API_KEY=
 NEMOTRON_LIGHTNING_ID=      # verify on build.nvidia.com
 NEMOTRON_SUPER_ID=
@@ -180,7 +185,7 @@ TWILIO_PHONE_NUMBER=
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REFRESH_TOKEN=       # one test account
-GOOGLE_MAPS_API_KEY=        # Places + Distance Matrix
+GOOGLE_MAPS_API_KEY=        # Places + Routes API
 DEMO_PHONE_ALLOWLIST=       # comma-separated teammate numbers, E.164
 VOICE_MODE=mock             # mock | live
 PLACES_MODE=fixture         # fixture | live
@@ -192,7 +197,7 @@ LIVE_STREAM_MODE=sse        # sse | poll
 
 ## Error codes
 
-`INTAKE_INCOMPLETE`, `NO_CLINICS_FOUND`, `CALL_FAILED`, `NO_ELIGIBLE_OFFER`, `APPROVAL_TIMEOUT`, `BOOKING_TENTATIVE`, `BOOKING_REJECTED`, `CALENDAR_ERROR`, `TRANSPORT_UNAVAILABLE`, `CONTACT_DECLINED`, `UNVERIFIED_SENDER`, `WEBHOOK_DUPLICATE`. Each produces an event and either a retry, a wait state or `failed`. Never a silent `completed`.
+`INTAKE_INCOMPLETE`, `NO_CLINICS_FOUND`, `CALL_FAILED`, `NO_ELIGIBLE_OFFER`, `RANKING_FAILED`, `APPROVAL_TIMEOUT`, `BOOKING_TENTATIVE`, `BOOKING_REJECTED`, `CALENDAR_ERROR`, `TRANSPORT_UNAVAILABLE`, `CONTACT_DECLINED`, `REJECTED_BY_OWNER`, `SMS_NOT_SENT`, `UNVERIFIED_SENDER`, `WEBHOOK_DUPLICATE`, `INTERNAL_ERROR`. Each produces an event and either a retry, a wait state or `failed`. Never a silent `completed`.
 
 ## Integration checkpoints
 
@@ -200,6 +205,6 @@ LIVE_STREAM_MODE=sse        # sse | poll
 2. Nano intake on the 20-utterance set → accuracy and latency logged.
 3. One real outbound call to a teammate, Lightning answering through the proxy → transcript and `call_result`.
 4. Three concurrent calls.
-5. Real Calendar insert once; real Places and Distance Matrix.
+5. Real Calendar insert once; real Places and Routes API.
 6. SMS round trip through the tunnel: approval YES and contact reply.
 7. Two full runs with reset between them.

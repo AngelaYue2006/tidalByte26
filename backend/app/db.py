@@ -1,4 +1,4 @@
-"""SQLite engine and session. Tables: tasks, contacts, calls, turns, events."""
+"""SQLite engine and session. Tables: tasks, contacts, calls, turns, events, receipts."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from sqlalchemy import Engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from app import models  # noqa: F401  registers the tables on SQLModel.metadata
+from app import models  # registers the tables on SQLModel.metadata
 
 
 def make_engine(database_url: str) -> Engine:
@@ -23,7 +23,11 @@ def make_engine(database_url: str) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
+    """Create missing tables, then apply the schema guarantees create_all leaves out on tables that already existed."""
     SQLModel.metadata.create_all(engine)
+    with engine.begin() as conn:
+        # create_all never alters an existing table; a database from before #20 has turns without this index.
+        conn.exec_driver_sql(f"CREATE UNIQUE INDEX IF NOT EXISTS {models.TURNS_UNIQUE_INDEX} ON turns (call_id, seq)")
 
 
 @contextmanager

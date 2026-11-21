@@ -1,4 +1,4 @@
-"""Simulated SMS facts only. No Twilio calls, state writes or message logging."""
+"""Typed mock/live SMS facts; no state writes or message logging."""
 
 import hashlib
 import os
@@ -8,23 +8,38 @@ from integrations.phone_policy import require_allowlisted
 from integrations.types import InboundSms, MessageReceipt
 
 
-def _require_mock():
-    if os.getenv("SMS_MODE", "mock") != "mock":
-        raise RuntimeError("SMS live mode is not implemented; use SMS_MODE=mock")
+def _mode():
+    mode = os.getenv("SMS_MODE", "mock")
+    if mode not in ("mock", "live"):
+        raise RuntimeError("SMS_MODE must be mock or live")
+    return mode
 
 
 def send(to_e164, text, idempotency_key) -> MessageReceipt:
-    _require_mock()
+    mode = _mode()
     require_allowlisted(to_e164)
-    if not idempotency_key or not text:
+    if (
+        not isinstance(idempotency_key, str)
+        or not idempotency_key.strip()
+        or not isinstance(text, str)
+        or not text.strip()
+    ):
         raise RuntimeError("SMS text and idempotency key are required")
+    if mode == "live":
+        from integrations.sms_live import send as send_live
+
+        return send_live(to_e164, text, idempotency_key)
     digest = hashlib.sha256(f"{to_e164}:{idempotency_key}".encode()).hexdigest()[:24]
     return MessageReceipt(message_id=f"mock-sms-{digest}", text=text, simulated=True)
 
 
 def parse_inbound(form) -> InboundSms:
-    # Mock input is synthetic, not an authenticated Twilio webhook. Live must fail closed.
-    _require_mock()
+    from integrations.sms_inbound import SignedSMSForm, parse
+
+    # D16: outbound stays mock while a trusted live inbound request is signed.
+    if _mode() == "live" or isinstance(form, SignedSMSForm):
+        return parse(form)
+    # Mock input is synthetic, not an authenticated Twilio webhook.
     sender = form.get("From", "")
     require_allowlisted(sender)
     users = read_fixture("users.json")
