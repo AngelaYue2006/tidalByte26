@@ -1,7 +1,7 @@
 """Exercise the real mock bridge and backend sink against a synthetic database.
 
-The pending common-recorder contract is a strict expected failure, never claimed
-as completed acceptance. No vendor requests or real people's data are used.
+Mock and live transcript lines share the backend recorder.
+No vendor requests or real people's data are used.
 """
 
 import asyncio
@@ -126,11 +126,6 @@ def test_real_backend_sink_receives_three_simulated_calls(replay):
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="Backend sink bypasses the common proxy recorder; Joyce must wire it and preserve simulated=true",
-)
 def test_mock_transcripts_use_the_same_recorder_as_live_proxy(replay):
     _, events, turns, _, recorder = replay
     transcripts = [json.loads(e.payload_json) for e in events if e.type == "transcript"]

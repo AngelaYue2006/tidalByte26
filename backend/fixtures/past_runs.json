@@ -1,0 +1,68 @@
+{
+  "_note": "Two finished synthetic runs that POST /api/demo/reset seeds for the history page (T12). Clinics join clinics.json on id; dates are the two weeks before the demo week. Nothing here is a requirement: the live pipeline writes the same records on its own.",
+  "runs": [
+    {
+      "id": "pastrun1a2b3c4d5e6f70819203a4b5c6d",
+      "days_ago": 8,
+      "text": "I need a dental cleaning next week, under $150. I have Delta Dental and I need a ride there.",
+      "intake": {
+        "care_type": "dental cleaning",
+        "budget_max": 150,
+        "insurance_carrier": "Delta Dental",
+        "time_range": {"start": "2026-11-09T00:00:00-06:00", "end": "2026-11-15T23:59:59-06:00"},
+        "needs_ride": true,
+        "search_area": "near home",
+        "dropped_fields": ["mobility_details"]
+      },
+      "windows": [
+        {"start": "2026-11-10T13:00:00-06:00", "end": "2026-11-10T17:00:00-06:00"},
+        {"start": "2026-11-12T08:00:00-06:00", "end": "2026-11-12T12:00:00-06:00"}
+      ],
+      "calls": [
+        {"clinic_id": "bright_smile", "price_usd": 95, "slot_start": "2026-11-12T09:30:00-06:00", "slot_end": "2026-11-12T10:30:00-06:00", "insured": true, "score": 0.92},
+        {"clinic_id": "smile_co", "price_usd": 120, "slot_start": "2026-11-13T16:00:00-06:00", "slot_end": "2026-11-13T17:00:00-06:00", "insured": true, "score": 0.61},
+        {"clinic_id": "oak_dental", "price_usd": 140, "slot_start": "2026-11-16T10:00:00-06:00", "slot_end": "2026-11-16T11:00:00-06:00", "insured": true, "score": 0.48}
+      ],
+      "winner": "bright_smile",
+      "decision": {
+        "reasons": ["Fits Thu am window", "Cheapest at $95", "Delta Dental accepted", "Closest 1.2 mi"],
+        "second": ["Smile Co. $120 Fri 4:00", "Oak Dental $140 Mon 10:00"],
+        "tradeoff": "Smile Co. is closer but $25 more and outside the free windows."
+      },
+      "booking": {"status": "confirmed", "confirmation_ref": "mock-conf-pastrun1", "calendar_event_id": "mock-calendar-pastrun1"},
+      "transport": {"available": false, "reason": "UNAVAILABLE_ACCESSIBLE_RIDE", "simulated": true},
+      "ride": {"pickup_time": "2026-11-12T09:00:00-06:00"}
+    },
+    {
+      "id": "pastrun2f1e2d3c4b5a69788796a5b4c3d2",
+      "days_ago": 15,
+      "text": "Can you book me a dental cleaning this week? Under $150 with Delta Dental. I can drive myself.",
+      "intake": {
+        "care_type": "dental cleaning",
+        "budget_max": 150,
+        "insurance_carrier": "Delta Dental",
+        "time_range": {"start": "2026-11-02T00:00:00-06:00", "end": "2026-11-08T23:59:59-06:00"},
+        "needs_ride": false,
+        "search_area": "near home",
+        "dropped_fields": []
+      },
+      "windows": [
+        {"start": "2026-11-06T14:00:00-06:00", "end": "2026-11-06T18:00:00-06:00"}
+      ],
+      "calls": [
+        {"clinic_id": "bright_smile", "price_usd": 95, "slot_start": "2026-11-09T09:30:00-06:00", "slot_end": "2026-11-09T10:30:00-06:00", "insured": true, "score": 0.0},
+        {"clinic_id": "smile_co", "price_usd": 120, "slot_start": "2026-11-06T16:00:00-06:00", "slot_end": "2026-11-06T17:00:00-06:00", "insured": true, "score": 0.88},
+        {"clinic_id": "oak_dental", "price_usd": 140, "slot_start": "2026-11-06T15:00:00-06:00", "slot_end": "2026-11-06T16:00:00-06:00", "insured": true, "score": 0.57}
+      ],
+      "winner": "smile_co",
+      "decision": {
+        "reasons": ["Fits Fri pm window", "Cheaper than Oak Dental", "Delta Dental accepted", "Closest 0.6 mi"],
+        "second": ["Oak Dental $140 Fri 3:00"],
+        "tradeoff": "Bright Smile is $25 cheaper but its first slot was the following week."
+      },
+      "booking": {"status": "confirmed", "confirmation_ref": "mock-conf-pastrun2", "calendar_event_id": "mock-calendar-pastrun2"},
+      "transport": {"available": false, "reason": "UNAVAILABLE_ACCESSIBLE_RIDE", "simulated": true},
+      "ride": null
+    }
+  ]
+}

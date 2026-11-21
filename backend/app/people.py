@@ -1,4 +1,4 @@
-"""The owner's on-device record and the contacts, from backend/fixtures/users.json until demo reset (#24) seeds them."""
+"""The owner's on-device record and the contacts, from backend/fixtures/users.json; demo reset (app/seed.py) reseeds the contacts table from the same file."""
 
 from __future__ import annotations
 

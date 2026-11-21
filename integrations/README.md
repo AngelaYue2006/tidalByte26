@@ -2,9 +2,8 @@
 
 Calendar, Places, distance, SMS and transport expose the existing signatures from
 `docs/ARCHITECTURE.md`. All results are Pydantic facts from `integrations.types`.
-Calendar, Places and distance support live mode as described below. SMS live
-mode still fails closed on this branch. Voice implementations are separate
-work (#13 and #26).
+Calendar, Places, distance and SMS support live modes as described below.
+Voice implementations are separate work (#13 and #26).
 
 The defaults are `CALENDAR_MODE=mock`, `PLACES_MODE=fixture`, `SMS_MODE=mock`,
 and `TRANSPORT_MODE=fixture`. The backend loads its environment; these adapters
@@ -42,7 +41,7 @@ Transport outputs are always simulated. No ride is booked.
 
 ## Synthetic inbound SMS
 
-`parse_inbound(form)` supports only mock mode. `From` must pass
+`parse_inbound(form)` in mock mode accepts synthetic forms. `From` must pass
 `DEMO_PHONE_ALLOWLIST` and match a synthetic owner/contact in `users.json`.
 `MessageSid` and `Body` are required; optional `task_id` is returned as correlation
 metadata, never proof that a task is waiting. The backend must match the sender
@@ -50,9 +49,8 @@ and waiting task before applying an approval or contact response. Fixture phones
 must be explicitly allowlisted for mock SMS too; there is no safety bypass.
 
 Mock inbound messages are marked simulated and are not authenticated Twilio
-webhooks. Live mode fails closed; signature verification, real sender mapping and
-live round-trip verification belong to #27. Do not expose mock parsing as a
-trusted public webhook.
+webhooks. Live mode requires the authenticated request envelope described below.
+Do not expose mock parsing as a trusted public webhook.
 
 ## Validation
 
@@ -180,29 +178,18 @@ viewer visibility, and publish each event once. `events.emit` expects type
 separate from the payload, so the shim removes `type` before passing that payload.
 Do not have both the recorder and shim emit the same transcript twice.
 
-**Shared callback acceptance is still pending after #58 merged.** The actual
-proxy callback is `record_turn(engine, bus, spec, seq, speaker, text)`, where
-`spec` is the backend's proxy CallSpec (available through `load_spec`), not the
-integration CallSpec. The simulator now supplies stable 1-based `seq` values for
-transcript lines, ordered by fixture timing and scoped to each call. A replay
-keeps these positions, so `(call_id, seq)` can identify the same turn on retry.
+The backend recorder fix (#87 / PR #88) is merged. The actual callback is
+`record_turn(engine, bus, spec, seq, speaker, text, simulated=True)`, using the
+backend proxy CallSpec loaded by `load_spec`. The simulator supplies stable
+1-based transcript `seq` values scoped to each call, ordered by fixture timing.
+The backend owns persistence, task visibility and deduplication by `(call_id, seq)`.
+Status/result events retain their normal sink; transcripts are published once.
 
-The orchestrator bridge (#75) reaches this simulator, but its `_voice_event`
-still emits transcript events directly without calling `record_turn`. A real
-backend-sink test gets 13 simulated transcript events and zero stored Turn rows.
-The existing recorder also omits `simulated` from its event payload. Joyce must
-route mock transcript events through that common recorder, preserve
-`simulated=True` for mock turns (live remains false), and avoid emitting a second
-transcript. Status/result events still use the normal backend sink. This requires
-backend changes; the adapter never imports backend persistence or writes a DB.
-
-`integrations/tests/test_voice_backend_callback.py` verifies the real default
-bridge and backend sink against an in-memory synthetic database. The common
-recorder assertion is a strict expected failure until that backend change lands;
-run it with `--runxfail` to see the unmet acceptance explicitly. Once fixed, remove
-the expected-failure marker and verify rows/events match once per `(call_id, seq)`.
-Keep #13 draft/blocked until this passes; mock event delivery by itself does not
-meet the shared-recorder criterion.
+`integrations/tests/test_voice_backend_callback.py` exercises the actual default
+bridge and backend sink against an in-memory synthetic database. Both assertions
+are required passing tests: three completed calls and 13 simulated transcript
+lines, with one recorder invocation and one matching Turn row per transcript.
+The adapter itself never imports backend persistence or writes a database.
 
 `start_call` returns immediately and schedules timed playback; the context exits
 only after playback finishes, or cancels pending tasks on failure/cancellation.
@@ -230,3 +217,76 @@ never create a calendar event for tentative results.
 fixture test (about 15 seconds), plus fast callback, retry, allowlist, disclosure,
 slot-match, cancellation and tentative-receipt regressions. External networking
 is forbidden; Windows asyncio's internal loopback socket pair is allowed.
+
+## Live SMS (#27)
+
+`SMS_MODE=live` retains `send(to_e164, text, idempotency_key)` and
+`parse_inbound(form)`. Existing Twilio/PUBLIC_BASE_URL settings suffice; no new
+variables are introduced. The send boundary checks DEMO_PHONE_ALLOWLIST before
+constructing the client and immediately before submission. The configured sender
+must be owned by the Twilio account and SMS-capable, as verified with a read-only
+IncomingPhoneNumbers lookup. A verified voice caller ID alone is insufficient.
+The adapter returns the accepted Message SID as a typed, non-simulated receipt;
+queued/accepted is submission evidence, not proof of final delivery. Timeouts and
+vendor failures return safe errors without logging response bodies or messages.
+SDK request/response logging is disabled, timeouts are bounded and retries are off.
+
+The backend still owns durable idempotency: persist the receipt under task+step
+and skip sends whose receipt already exists. The adapter does not write database
+state and does not claim that Twilio enforces the supplied idempotency key.
+After an ambiguous timeout, reconcile the send before retrying; do not blindly
+resubmit. No process-local cache is presented as durable deduplication.
+
+For live inbound requests the backend route must build trusted context:
+
+```python
+from integrations.sms_inbound import SignedSMSForm
+from integrations.sms_twilio import parse_inbound
+
+incoming = parse_inbound(SignedSMSForm(
+    parameters=await request.form(),  # entire form, no signature/role added to it
+    signature=request.headers.get("X-Twilio-Signature", ""),
+    roles=phone_to_role_from_backend_identity_store,
+))
+```
+
+`roles` must come from backend-owned identity data, never request fields or an
+inferred order in the allowlist. No identities are invented from fixture phones
+in live mode. Configure Twilio to POST to
+`PUBLIC_BASE_URL + /api/webhooks/twilio/sms`, with an HTTPS origin and no query
+string. The signature is checked against that configured external URL (not an
+untrusted forwarded host), including all form fields. Duplicate fields, unsigned
+bare forms, unknown/unmapped senders, wrong account/recipient and media messages
+are rejected. Media is never fetched or stored. A signed `task_id` is correlation
+only; it does not authorize an approval or associate the sender with a task.
+
+**Backend dependency:** Joyce's #22/#23 must wire the route, bind real identities,
+check the waiting task state and scope, durably deduplicate MessageSid, invoke
+approval/contact handling and return a fast 2xx/TwiML acknowledgement. The backend
+must map signature/allowlist failures to rejection without exposing request data
+or mutating task state. This PR never imports the backend or writes its files.
+Main now has the approval webhook from #22, but it must wrap the actual request
+header/form and backend identities in SignedSMSForm before live validation can
+succeed. Bare live forms raise the RuntimeError its handler catches, returning a
+safe ignored result. #7 / PR #79 separately records the live trial send/receive;
+per the coordinator, #27 lands on code review and mock tests using that evidence,
+without claiming the separate backend YES/contact workflow is complete.
+
+Tests use synthetic forms, SDK signature generation and fake Twilio resources.
+The read-only live preflight found that the configured sender does not meet the
+owned/SMS-capable requirement. No real SMS was sent or received. Exact command
+and sanitized result are in PR #76; successful live send and ngrok round trip
+remain acceptance work after the account and backend dependencies are resolved.
+
+References: [Twilio request validation](https://www.twilio.com/docs/usage/security),
+[Messages resource](https://www.twilio.com/docs/messaging/api/message-resource).
+
+
+D16 compatibility: SMS_MODE=mock continues to simulate outbound messages. A
+trusted SignedSMSForm always uses live signature validation and returns a
+non-simulated inbound fact, even with SMS_MODE=mock. This supports the decided
+mock-outbound/live-inbound demo without sending custom trial SMS. A plain form
+cannot supply trusted signature or role context. The new-style trial's classic
+IncomingPhoneNumbers lookup result is not an outstanding #27 acceptance blocker:
+Joyce's delivered/received evidence and its limitations are recorded in #7/PR #79.
+The optional live outbound sender check remains strict; the demo keeps it off.

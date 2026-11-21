@@ -13,10 +13,12 @@ import pytest
 from app.adapters import Deps, VoiceMockBridge
 from app.config import load_settings
 from app.main import create_app
+from app.models import Call, Turn
 from app.orchestrator import booking_record
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
+from sqlmodel import Session, select
 
 from integrations.types import Booking
 from tests.stand_ins import DEMO_TEXT, FakeNano, FakeSuper, instant
@@ -73,15 +75,17 @@ class CountingVoice(VoiceMockBridge):
         return confirmation
 
 
-def make_client(monkeypatch, tmp_path, voice=None, nano: FakeNano | None = None):
-    """The app with the default wiring (`Deps()`), only Nano and Super replaced by stand-ins and the clock pinned."""
+def make_client(monkeypatch, tmp_path, voice=None, nano: FakeNano | None = None, **deps_overrides):
+    """The app with the default wiring (`Deps()`), only Nano and Super replaced by stand-ins and the clock pinned.
+    `deps_overrides` replace other `Deps` fields (a counting `sms_send`, say) or pass `environ` for extra settings."""
+    environ = {"DATABASE_URL": f"sqlite:///{tmp_path}/lifeline.db", "DEMO_PHONE_ALLOWLIST": FAKE_PHONES, **deps_overrides.pop("environ", {})}
     monkeypatch.setenv("DEMO_PHONE_ALLOWLIST", FAKE_PHONES)  # the integrations mocks read the allowlist from the environment
     for var in ("VOICE_MODE", "PLACES_MODE", "CALENDAR_MODE", "SMS_MODE", "TRANSPORT_MODE"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("METRICS_PATH", str(tmp_path / "metrics.jsonl"))
-    settings = load_settings(env_file=None, environ={"DATABASE_URL": f"sqlite:///{tmp_path}/lifeline.db", "DEMO_PHONE_ALLOWLIST": FAKE_PHONES})
+    settings = load_settings(env_file=None, environ=environ)
     voice = voice or CountingVoice()
-    deps = Deps(voice=voice, intake_model=lambda: nano or FakeNano(), rank_client=FakeSuper, now=lambda: DEMO_NOW)
+    deps = Deps(voice=voice, intake_model=lambda: nano or FakeNano(), rank_client=FakeSuper, now=lambda: DEMO_NOW, **deps_overrides)
     app = create_app(settings, deps=deps)
     client = TestClient(app)
     client.__enter__()
@@ -213,14 +217,19 @@ def test_waits_resume_only_on_the_matching_post(client):
     assert r.json() == {"status": "awaiting_contact", "ride": "declined"}
     time.sleep(0.1)
     assert client.get(f"/api/tasks/{task_id}?viewer_id=mary").json()["status"] == "awaiting_contact"
-    assert [e["type"] for e in events(client, task_id)][-1] == "contact_reply" and "ride_confirmed" not in [e["type"] for e in events(client, task_id)]
+    # the decline is recorded, the owner is told (T10), and nothing confirms a ride
+    types_after_decline = [e["type"] for e in events(client, task_id)]
+    assert types_after_decline[-2:] == ["contact_reply", "task_updated"] and "ride_confirmed" not in types_after_decline
+    told = [e for e in events(client, task_id) if e["type"] == "task_updated" and e.get("reason") == "CONTACT_DECLINED"]
+    assert told and told[-1]["status"] == "awaiting_contact"
+    assert "CONTACT_DECLINED" not in json.dumps(events(client, task_id, viewer="sarah")), "the owner's note is not the contact's business"
     assert client.voice.confirmed == [call_ids(client, task_id)["Bright Smile Dental"]], "the booking call-back ran exactly once"
     # the same declined key again: same answer, no second reply; a new key is a new reply
     before = len(events(client, task_id))
     assert client.post("/api/contacts/offers?viewer_id=sarah", json={"task_id": task_id, "contact_id": "sarah", "offer": {"can_drive": False}, "idempotency_key": "no"}).json() == {"status": "awaiting_contact", "ride": "declined"}
     assert len(events(client, task_id)) == before
     client.post("/api/contacts/offers?viewer_id=sarah", json={"task_id": task_id, "contact_id": "sarah", "offer": {"can_drive": False}, "idempotency_key": "no-2"})
-    assert len(events(client, task_id)) == before + 1
+    assert len(events(client, task_id)) == before + 2  # the reply, and the owner's CONTACT_DECLINED note
     # an offer confirms once: the same key replays, a second offer with a new key is refused, one ride_confirmed in total
     first = client.post("/api/contacts/offers?viewer_id=sarah", json={"task_id": task_id, "contact_id": "sarah", "offer": {"can_drive": True}, "idempotency_key": "yes"}).json()
     again = client.post("/api/contacts/offers?viewer_id=sarah", json={"task_id": task_id, "contact_id": "sarah", "offer": {"can_drive": True}, "idempotency_key": "yes"}).json()
@@ -356,14 +365,14 @@ def test_failed_approval_write_releases_the_wait_for_a_retry(client, monkeypatch
 
 
 def test_failed_ride_write_leaves_no_partial_reply_and_allows_retry(client, monkeypatch):
-    from app.routers import contacts
+    from app import contact_replies
 
     task_id = start(client)
     wait_for(client, task_id, "awaiting_approval")
     client.post(f"/api/tasks/{task_id}/approve?viewer_id=mary", json={"actor_id": "mary", "decision": "approve", "idempotency_key": "ok"})
     wait_for(client, task_id, "awaiting_contact")
     before = events(client, task_id)
-    _failing_once(contacts, "emit_many", monkeypatch)
+    _failing_once(contact_replies, "emit_many", monkeypatch)
     offer = {"task_id": task_id, "contact_id": "sarah", "offer": {"can_drive": True}, "idempotency_key": "ride"}
     with pytest.raises(RuntimeError, match="injected"):
         client.post("/api/contacts/offers?viewer_id=sarah", json=offer)
@@ -460,3 +469,24 @@ def test_refused_sms_is_reported_to_the_owner_and_never_shown_as_sent(monkeypatc
         assert notified["sms_user"] == "" and notified["sms_contact"].startswith("LifeLine:"), "the contact's receipt is shown, the owner's refusal is not faked"
     finally:
         client.__exit__(None, None, None)
+
+
+def test_mock_transcript_lines_are_turn_rows_one_to_one(client):
+    """#87: a mock call leaves what a live call leaves: one `turns` row per transcript event, same (call_id, seq, speaker, text),
+    seq counting 1..n per call, every line labelled simulated."""
+    task_id = start(client)
+    wait_for(client, task_id, "awaiting_approval")
+    lines = [e for e in events(client, task_id) if e["type"] == "transcript"]
+    assert len(lines) >= 10 and all(e["simulated"] is True and e["visibility"] == "contact" for e in lines)
+    with Session(client.app.state.engine) as session:
+        turns = session.exec(select(Turn).join(Call, Call.id == Turn.call_id).where(Call.task_id == task_id)).all()
+        rows = {(t.call_id, t.seq, t.speaker, t.text) for t in turns}
+    assert len(turns) == len(lines) == len(rows)
+    assert rows == {(e["call_id"], e["seq"], e["speaker"], e["text"]) for e in lines}
+    for call_id in call_ids(client, task_id).values():
+        seqs = [e["seq"] for e in lines if e["call_id"] == call_id]
+        assert seqs == list(range(1, len(seqs) + 1)), call_id
+        assert next(e for e in lines if e["call_id"] == call_id and e["speaker"] == "agent")["text"].startswith("Hi, I'm an AI assistant calling for a patient.")
+    for event in lines:
+        EVENTS_VALIDATOR.validate({k: v for k, v in event.items() if k != "id"})
+    assert [e["type"] for e in events(client, task_id, viewer="sarah") if e["type"] == "transcript"] == ["transcript"] * len(lines)

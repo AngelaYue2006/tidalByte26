@@ -7,6 +7,7 @@ Row kinds and their fields (the contract the summary reads):
 - `redaction`:  model, utterance_id, kept_expected, kept_correct, dropped_expected, dropped_correct, dropped_extra  (T2)
 - `ranking`:    model, latency_ms, offers                                                            (ranker.timed_rank)
 - `call_agent`: model, call_id, first_token_ms                                                       (llm_proxy, #20)
+- `contact_message`: model, latency_ms, chars, source (nano | template), violations[]                  (local_intake.contact_message)
 """
 
 from __future__ import annotations

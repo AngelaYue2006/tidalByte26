@@ -20,14 +20,25 @@ async def instant(_seconds: float) -> None:
 
 
 class FakeNano:
-    """Answers the intake prompt with a fixed redacted proposal."""
+    """Answers the intake prompt with a fixed redacted proposal, and the contact prompt with a scoped message built
+    from the appointment facts in the record (or `contact_message`, to test the check)."""
 
     name = "fake-nano"
 
-    def __init__(self, proposal: dict | None = None) -> None:
+    def __init__(self, proposal: dict | None = None, contact_message: str | None = None) -> None:
         self.proposal = proposal or DEMO_INTAKE
+        self.contact_message = contact_message
+        self.contact_records: list[dict] = []  # what the contact prompt was given, for the no-leak test
 
     def complete_json(self, system: str, user: str, schema: dict) -> dict:
+        if "message" in schema.get("properties", {}):
+            record = json.loads(user)
+            self.contact_records.append(record)
+            if self.contact_message is not None:
+                return {"message": self.contact_message}
+            a = record["appointment"]
+            return {"message": (f"Hi {record['contact']['first_name']}, {a['owner_first_name']} has a {a['for']} at {a['clinic']} on {a['when']}, "
+                                f"{a['address']}. No accessible ride was found. Can you drive? Reply YES or NO.")}
         return dict(self.proposal)
 
 

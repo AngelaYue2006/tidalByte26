@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
-from app.events import events_after, resolve_viewer
+from app.events import RESET_SIGNAL, events_after, resolve_viewer
 from app.projections import snapshot
 from app.session import require_session
 
@@ -44,9 +44,15 @@ async def live(request: Request, viewer_id: str = Query(min_length=1)) -> Stream
             while not await request.is_disconnected():
                 woke = True
                 try:
-                    await asyncio.wait_for(sub.queue.get(), timeout=heartbeat)  # a wake-up, not the event itself
+                    signal = await asyncio.wait_for(sub.queue.get(), timeout=heartbeat)  # a wake-up, not the event itself
                 except TimeoutError:
                     woke = False
+                else:
+                    if signal == RESET_SIGNAL:  # demo reset wiped the tables: start over with a fresh snapshot
+                        snap = snapshot(engine, viewer)
+                        cursor = snap.pop("cursor", 0)
+                        yield format_sse(snap, cursor or None)
+                        continue
                 # Read what is persisted past the cursor, in id order: no duplicates with the snapshot, no regressions,
                 # and a notification that arrives early, late or not at all (a lost wake-up) changes nothing but timing.
                 with Session(engine) as session:
