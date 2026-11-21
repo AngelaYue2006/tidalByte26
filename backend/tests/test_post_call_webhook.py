@@ -274,6 +274,41 @@ def test_processing_failure_is_answered_500_so_elevenlabs_retries(client, app, m
     assert len(events(app, "call_result")) == 1 and len(events(app, "call_status")) == 1 and call(app)[0] == "done"
 
 
+def test_a_slow_summary_does_not_block_other_deliveries(tmp_path):
+    import threading
+    import time as _time
+
+    class SlowSuper(FakeSuper):
+        def complete_json(self, system, user, *, previous=None):
+            _time.sleep(1.5)
+            return super().complete_json(system, user, previous=previous)
+
+    app = create_app(load_settings(env_file=None, environ={**ENV, "DATABASE_URL": f"sqlite:///{tmp_path}/slow.db"}))
+    app.state.super_client = SlowSuper(GOOD_SUMMARY)
+    with TestClient(app) as c:
+        with session_scope(app.state.engine) as s:
+            s.add(Task(id="task-1", owner_id="mary", status="calling", windows_json=json.dumps(WINDOWS)))
+            s.add(Call(id="call-a", task_id="task-1", clinic_name="Bright Smile Dental", clinic_phone="+15555550111", status="live", external_ref="conv-a"))
+            s.add(Call(id="call-b", task_id="task-1", clinic_name="Smile Co.", clinic_phone="+15555550112", status="live", external_ref="conv-b"))
+        timings = {}
+
+        def slow():
+            t0 = _time.perf_counter()
+            timings["slow_status"] = post(c, payload({}, conversation_id="conv-a", call_id="call-a")).status_code  # needs Super: 1.5 s
+            timings["slow"] = _time.perf_counter() - t0
+
+        th = threading.Thread(target=slow)
+        th.start()
+        _time.sleep(0.2)  # the slow one is inside Super now
+        t0 = _time.perf_counter()
+        fast = post(c, payload(conversation_id="conv-b", call_id="call-b"))  # complete data collection, no Super
+        timings["fast"] = _time.perf_counter() - t0
+        th.join()
+        assert fast.status_code == 200 and timings["slow_status"] == 200
+        assert timings["fast"] < 1.0 < timings["slow"], timings  # the fast one finished while the slow one was still waiting on Super
+        assert call(app, "call-a")[0] == "done" and call(app, "call-b")[0] == "done"
+
+
 def test_duplicate_is_acknowledged_as_such(client):
     post(client, payload())
     assert post(client, payload()).json() == {"ok": True, "accepted": "post_call_transcription", "duplicate": True}

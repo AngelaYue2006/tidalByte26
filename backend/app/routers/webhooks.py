@@ -3,8 +3,8 @@
 Only the ElevenLabs post-call handler is here (#21). Twilio SMS belongs to #22 and #23.
 Order of checks: signature (ElevenLabs-Signature, HMAC-SHA256 over "<t>.<raw body>", 30-minute window),
 then the event type, then the call it belongs to (conversation_id -> calls.external_ref, falling back to the
-dynamic variable call_id), then the atomic per-call claim inside call_results. The delivery is acknowledged with 200 only after the
-result is committed; a processing failure answers 500 so ElevenLabs retries, and the atomic claim makes
+dynamic variable call_id), then the atomic per-call claim inside call_results. The synchronous work (Super, SQLite) runs on a worker thread so the event loop keeps serving the parallel calls
+and the SSE stream; the delivery is acknowledged with 200 only after the result is committed; a processing failure answers 500 so ElevenLabs retries, and the atomic claim makes
 that retry safe. (A pending-delivery table would let the handler answer faster; not needed at demo scale.)
 """
 
@@ -18,6 +18,7 @@ import time
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import Engine
 from sqlmodel import select
 
@@ -158,7 +159,9 @@ async def elevenlabs_post_call(request: Request) -> dict:
         return {"ok": True, "ignored": "unhandled_type"}
     client = super_client(request) if payload.get("type") == "post_call_transcription" else None
     try:
-        outcome = process_post_call(request.app.state.engine, request.app.state.bus, settings, payload, client)
+        # Super and SQLite are synchronous: run them on a worker thread so the three parallel calls and the SSE stream
+        # keep being served, and still answer only once the result is durable.
+        outcome = await run_in_threadpool(process_post_call, request.app.state.engine, request.app.state.bus, settings, payload, client)
     except Exception as exc:  # anything not committed: say so, ElevenLabs retries, the claim keeps the retry safe
         log.exception("post-call webhook processing failed; asking for a retry")
         raise HTTPException(500, "post-call processing failed; retry") from exc
