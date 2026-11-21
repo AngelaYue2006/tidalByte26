@@ -596,6 +596,82 @@ select {
   align-items: center;
 }
 
+.chip-accent {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.decision-card .decision-title {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.decision-card .decision-title svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.decision-tradeoff {
+  margin: 8px 0 10px;
+}
+
+.decision-footer {
+  font-size: 0.8rem;
+}
+
+.decision-pick {
+  margin-top: 10px;
+  font-size: 0.85rem;
+}
+
+.decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.decision-approve,
+.decision-reject {
+  min-height: 44px;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.decision-approve {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--card);
+}
+
+.decision-reject {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+}
+
+.decision-approve:disabled,
+.decision-reject:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.decision-approved {
+  margin: 12px 0 0;
+  color: var(--good);
+  font-weight: 500;
+}
+
+.decision-contact-note {
+  margin: 12px 0 0;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 800px) {
   .wrap {
     padding: 16px;
