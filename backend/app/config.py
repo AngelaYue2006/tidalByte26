@@ -113,9 +113,20 @@ class Settings(BaseModel):
         self.require(env_name)
         return self.model_id(which)  # type: ignore[return-value]
 
+    @property
+    def any_live(self) -> bool:
+        return any(mode == "live" for mode in self.modes.values())
+
     def validate_startup(self) -> None:
-        """Raise MissingSetting when any adapter set to live lacks a value it needs."""
+        """Raise MissingSetting when any adapter set to live lacks a value it needs.
+
+        Any live adapter means the live pipeline runs, and that pipeline uses all three Nemotron models
+        (Nano for intake, Lightning on the calls, Super for ranking; docs/DECISIONS.md D4), so every
+        model ID must be set before the app may start.
+        """
         missing: list[str] = []
+        if self.any_live:
+            missing += [name for name in MODEL_IDS.values() if not getattr(self, name.lower())]
         for adapter, needed in LIVE_REQUIREMENTS.items():
             if self.modes[adapter] == "live":
                 missing += [name for name in needed if not getattr(self, name.lower())]

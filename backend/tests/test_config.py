@@ -28,13 +28,37 @@ def test_allowlist_is_parsed_from_comma_separated_e164():
     assert s.demo_phone_allowlist == ("+15550100001", "+15550100002")
 
 
-def test_live_voice_without_lightning_id_raises_at_startup():
-    env = {**ALL_MOCK, "VOICE_MODE": "live", "NVIDIA_API_KEY": "x", "ELEVENLABS_API_KEY": "x", "ELEVENLABS_AGENT_ID": "x",
-           "ELEVENLABS_PHONE_NUMBER_ID": "x", "LLM_PROXY_SECRET": "x", "PUBLIC_BASE_URL": "https://example.ngrok.app",
-           "DEMO_PHONE_ALLOWLIST": "+15550100001"}
-    with pytest.raises(MissingSetting, match="NEMOTRON_LIGHTNING_ID"):
+MODEL_ENV = {"NEMOTRON_NANO_TAG": "nano:4bit", "NEMOTRON_LIGHTNING_ID": "nvidia/lightning", "NEMOTRON_SUPER_ID": "nvidia/super"}
+LIVE_VOICE = {**ALL_MOCK, **MODEL_ENV, "VOICE_MODE": "live", "NVIDIA_API_KEY": "x", "ELEVENLABS_API_KEY": "x",
+              "ELEVENLABS_AGENT_ID": "x", "ELEVENLABS_PHONE_NUMBER_ID": "x", "LLM_PROXY_SECRET": "x",
+              "PUBLIC_BASE_URL": "https://example.ngrok.app", "DEMO_PHONE_ALLOWLIST": "+15550100001"}
+
+
+def test_live_voice_with_every_value_set_starts():
+    load_settings(env_file=None, environ=LIVE_VOICE).validate_startup()
+
+
+@pytest.mark.parametrize("model_env", sorted(MODEL_ENV))
+def test_live_voice_without_any_one_model_id_raises_at_startup(model_env):
+    env = {k: v for k, v in LIVE_VOICE.items() if k != model_env}
+    with pytest.raises(MissingSetting, match=model_env):
         load_settings(env_file=None, environ=env).validate_startup()
-    load_settings(env_file=None, environ={**env, "NEMOTRON_LIGHTNING_ID": "some/id"}).validate_startup()
+
+
+@pytest.mark.parametrize("live_mode", ["PLACES_MODE", "CALENDAR_MODE", "SMS_MODE"])
+def test_any_live_adapter_requires_all_three_model_ids(live_mode):
+    s = load_settings(env_file=None, environ={**ALL_MOCK, live_mode: "live"})
+    assert s.any_live
+    with pytest.raises(MissingSetting) as exc:
+        s.validate_startup()
+    for name in MODEL_ENV:
+        assert name in str(exc.value)
+
+
+def test_all_mock_needs_no_model_id():
+    s = load_settings(env_file=None, environ=ALL_MOCK)
+    assert not s.any_live
+    s.validate_startup()
 
 
 def test_live_sms_and_calendar_name_every_missing_value():
