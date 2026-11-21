@@ -1,1 +1,273 @@
-"""T2: run the 20 fixture utterances through local_intake.redact; assert dropped fields and kept fields."""
+"""T2: run the 20 fixture utterances through local_intake.redact; assert dropped fields and kept fields.
+
+Two stand-in models drive the pipeline without Ollama: PerfectModel answers with the fixture's expected values and
+BlankModel answers with nothing useful, which exercises the regex backstop. Every output must validate against
+shared/intake_request.schema.json and must not contain any value that was supposed to be dropped. Set
+LIFELINE_LIVE_INTAKE=1 with OLLAMA_BASE_URL and NEMOTRON_NANO_TAG to run the same set through the real model.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+from datetime import datetime
+from pathlib import Path
+
+import httpx
+import pytest
+from app import metrics
+from app.nemotron import intake_backstop as backstop
+from app.nemotron import local_intake
+from app.nemotron.local_intake import IntakeError, OllamaClient, redact
+from app.nemotron.types import IntakeRequest, UserRecord
+from jsonschema import Draft202012Validator
+
+ROOT = Path(__file__).resolve().parents[2]
+FIXTURE = ROOT / "backend" / "fixtures" / "intake_utterances.jsonl"
+SCHEMA = json.loads((ROOT / "shared" / "intake_request.schema.json").read_text())
+USERS = json.loads((ROOT / "backend" / "fixtures" / "users.json").read_text())
+
+# Words that name symptoms, medications or mobility details in the fixture; none may survive into the output.
+SENSITIVE_WORDS = (
+    "ibuprofen", "metformin", "lisinopril", "vicodin", "warfarin", "toothache", "spasm", "mole", "dizzy",
+    "pacemaker", "knee", "walker", "fall", "johnson", "mary", "sarah", "1948", "1945", "example street", "demo-", "555-",
+)
+
+INLINE_CASES = [
+    {
+        "id": "inline_demo",
+        "now": "2026-11-23T09:00:00-06:00",
+        "utterance": "I need a dental cleaning this week, under $150. I have Delta Dental. My knee makes walking hard so I'll need a ride.",
+        "expected": {
+            "care_type": "dental cleaning", "budget_max": 150, "insurance_carrier": "Delta Dental",
+            "time_range": {"start": "2026-11-23T00:00:00-06:00", "end": "2026-11-29T23:59:59-06:00"},
+            "needs_ride": True, "search_area": "near home",
+        },
+        "expected_dropped": ["mobility_details"],
+    },
+    {
+        "id": "inline_identifiers",
+        "now": "2026-11-23T09:00:00-06:00",
+        "utterance": "Mary Johnson, born 3/14/48, member DEMO-0000-0000-0001, 100 Example Street. Eye exam next week, Medicare, call 555-555-0101.",
+        "expected": {
+            "care_type": "eye exam", "budget_max": None, "insurance_carrier": "Medicare",
+            "time_range": {"start": "2026-11-30T00:00:00-06:00", "end": "2026-12-06T23:59:59-06:00"},
+            "needs_ride": False, "search_area": "near home",
+        },
+        "expected_dropped": ["member_id", "date_of_birth", "address", "contact_phone", "patient_name"],
+    },
+]
+
+
+def fixture_rows() -> list[dict]:
+    if not FIXTURE.exists():
+        return []
+    return [json.loads(line) for line in FIXTURE.read_text().splitlines() if line.strip()]
+
+
+ROWS = fixture_rows() or INLINE_CASES
+IDS = [r["id"] for r in ROWS]
+
+
+def owner() -> UserRecord:
+    if isinstance(USERS, dict) and "owner" in USERS:
+        return UserRecord.model_validate(USERS["owner"])
+    return UserRecord(id="mary", name="Mary Johnson", phone_e164="+15555550100", timezone="America/Chicago")
+
+
+def phrase_for(expected: dict, now: datetime) -> str:
+    want = (expected["time_range"]["start"], expected["time_range"]["end"])
+    for phrase in backstop.TIME_PHRASES:
+        if backstop.resolve_time_range(phrase, now) == want:
+            return phrase
+    raise AssertionError(f"no phrase resolves to {want}")
+
+
+class PerfectModel:
+    """What a flawless Nano would say."""
+
+    name = "perfect-stub"
+
+    def __init__(self, row: dict) -> None:
+        self.row = row
+        self.calls: list[str] = []
+
+    def complete_json(self, system: str, user: str, schema: dict) -> dict:
+        self.calls.append(user)
+        e = self.row["expected"]
+        return {
+            "care_type": e["care_type"], "budget_max": e["budget_max"], "insurance_carrier": e["insurance_carrier"],
+            "time_phrase": phrase_for(e, datetime.fromisoformat(self.row["now"])), "needs_ride": e["needs_ride"],
+            "search_area": e["search_area"], "dropped_fields": list(self.row["expected_dropped"]),
+        }
+
+
+class BlankModel:
+    """Gets the care type and nothing else; the backstop has to do the rest."""
+
+    name = "blank-stub"
+
+    def __init__(self, row: dict) -> None:
+        self.row = row
+
+    def complete_json(self, system: str, user: str, schema: dict) -> dict:
+        return {
+            "care_type": self.row["expected"]["care_type"], "budget_max": None, "insurance_carrier": None,
+            "time_phrase": "", "needs_ride": False, "search_area": None, "dropped_fields": [],
+        }
+
+
+class LeakyModel(PerfectModel):
+    """Copies identifiers into fields it should not."""
+
+    name = "leaky-stub"
+
+    def complete_json(self, system: str, user: str, schema: dict) -> dict:
+        out = super().complete_json(system, user, schema)
+        out["search_area"] = "100 Example Street, Chicago"
+        out["insurance_carrier"] = "Delta Dental DEMO-0000-0000-0001"
+        return out
+
+
+@pytest.fixture(autouse=True)
+def metrics_file(tmp_path, monkeypatch):
+    path = tmp_path / "metrics.jsonl"
+    monkeypatch.setenv("METRICS_PATH", str(path))
+    return path
+
+
+def run(row: dict, model) -> IntakeRequest:
+    return redact(row["utterance"], owner(), model=model, now=datetime.fromisoformat(row["now"]))
+
+
+def assert_no_leak(row: dict, request: IntakeRequest) -> None:
+    out = request.model_dump_json().lower()
+    for value in backstop.identifier_values(row["utterance"]):
+        assert value.lower() not in out, (row["id"], value)
+    if row["expected_dropped"]:
+        for word in SENSITIVE_WORDS:
+            assert word not in out, (row["id"], word)
+    assert row["utterance"].lower() not in out
+
+
+def test_fixture_present_or_inline_fallback():
+    assert len(ROWS) in (2, 20), "20 fixture rows from #4, or the 2 inline cases until it merges"
+
+
+@pytest.mark.parametrize("row", ROWS, ids=IDS)
+def test_perfect_model_output_matches_expected_and_schema(row):
+    request = run(row, PerfectModel(row))
+    Draft202012Validator(SCHEMA).validate(request.model_dump())
+    assert request.model_dump(exclude={"dropped_fields"}) == row["expected"], row["id"]
+    assert request.dropped_fields == sorted(row["expected_dropped"], key=backstop.DROPPABLE_ORDER)
+    assert_no_leak(row, request)
+
+
+@pytest.mark.parametrize("row", ROWS, ids=IDS)
+def test_backstop_recovers_budget_carrier_time_and_identifiers(row):
+    request = run(row, BlankModel(row))
+    Draft202012Validator(SCHEMA).validate(request.model_dump())
+    e = row["expected"]
+    assert request.budget_max == e["budget_max"], row["id"]
+    assert request.insurance_carrier == e["insurance_carrier"], row["id"]
+    assert request.time_range.model_dump() == e["time_range"], row["id"]
+    assert request.needs_ride == e["needs_ride"], row["id"]
+    detectable = {"member_id", "contact_phone", "date_of_birth", "address"}
+    assert set(request.dropped_fields) & detectable == set(row["expected_dropped"]) & detectable, row["id"]
+    assert_no_leak(row, request)
+
+
+@pytest.mark.parametrize("row", ROWS, ids=IDS)
+def test_leaky_model_is_scrubbed(row):
+    request = run(row, LeakyModel(row))
+    assert request.search_area == "near home"
+    assert request.insurance_carrier in (None, row["expected"]["insurance_carrier"])
+    assert "address" in request.dropped_fields
+    assert_no_leak(row, request)
+    Draft202012Validator(SCHEMA).validate(request.model_dump())
+
+
+def test_report_fields_kept_and_dropped(capsys):
+    """The T2 report: per utterance, which fields were kept and which kinds were dropped."""
+    lines = []
+    for row in ROWS:
+        request = run(row, PerfectModel(row))
+        kept = [k for k, v in request.model_dump(exclude={"dropped_fields"}).items() if v not in (None, "")]
+        lines.append(f"{row['id']}: kept {','.join(kept)}; dropped {','.join(request.dropped_fields) or '-'}")
+    print("\nT2 redaction report\n" + "\n".join(lines))
+    assert len(lines) == len(ROWS)
+
+
+def test_raw_text_is_never_logged_above_debug(caplog):
+    row = ROWS[0]
+    with caplog.at_level(logging.INFO, logger="app.nemotron.local_intake"):
+        run(row, PerfectModel(row))
+    assert caplog.records, "intake logs one INFO line"
+    for record in caplog.records:
+        assert row["utterance"] not in record.getMessage()
+        assert record.levelno >= logging.INFO
+
+
+def test_metrics_record_latency_without_text(metrics_file):
+    row = ROWS[0]
+    run(row, PerfectModel(row))
+    rows = [json.loads(line) for line in metrics_file.read_text().splitlines()]
+    assert len(rows) == 1 and rows[0]["kind"] == "intake"
+    assert rows[0]["model"] == "perfect-stub"
+    assert isinstance(rows[0]["latency_ms"], int) and rows[0]["latency_ms"] >= 0
+    assert row["utterance"] not in metrics_file.read_text()
+    with pytest.raises(ValueError):
+        metrics.record("intake", text="never")
+
+
+def test_ollama_client_only_calls_ollama_base_url(monkeypatch):
+    seen: list[str] = []
+
+    class Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {"message": {"content": json.dumps(PerfectModel(ROWS[0]).complete_json("", "", {}))}}
+
+    def fake_post(url, json=None, timeout=None):
+        seen.append(url)
+        return Response()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    client = OllamaClient("http://localhost:11434/", "nano-test-tag")
+    request = run(ROWS[0], client)
+    assert seen == ["http://localhost:11434/api/chat"]
+    assert request.care_type == ROWS[0]["expected"]["care_type"]
+
+
+def test_missing_model_tag_raises_instead_of_guessing(monkeypatch):
+    monkeypatch.delenv("NEMOTRON_NANO_TAG", raising=False)
+    with pytest.raises(IntakeError, match="NEMOTRON_NANO_TAG"):
+        local_intake.from_env()
+
+
+def test_empty_utterance_is_intake_incomplete():
+    with pytest.raises(IntakeError, match="INTAKE_INCOMPLETE"):
+        redact("   ", owner(), model=PerfectModel(ROWS[0]))
+
+
+@pytest.mark.skipif(os.environ.get("LIFELINE_LIVE_INTAKE") != "1", reason="set LIFELINE_LIVE_INTAKE=1 with Ollama running")
+def test_live_nano_on_the_fixture_set(capsys):
+    """Runs the set through the real local model. Fails only on a leak; prints accuracy per field for the pitch."""
+    client = local_intake.from_env()
+    hits = {k: 0 for k in ("care_type", "budget_max", "insurance_carrier", "time_range", "needs_ride", "search_area", "dropped_fields")}
+    for row in ROWS:
+        request = run(row, client)
+        assert_no_leak(row, request)
+        got = request.model_dump()
+        for key in hits:
+            if key == "dropped_fields":
+                hits[key] += set(got[key]) == set(row["expected_dropped"])
+            elif key == "care_type":
+                hits[key] += re.sub(r"\W", "", got[key]) == re.sub(r"\W", "", row["expected"][key])
+            else:
+                hits[key] += got[key] == row["expected"][key]
+    print("\nLive Nano accuracy over", len(ROWS), "utterances:", {k: f"{v}/{len(ROWS)}" for k, v in hits.items()})
