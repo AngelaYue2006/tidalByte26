@@ -6,12 +6,13 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
-from app.events import resolve_viewer
+from app.events import events_after, resolve_viewer
 from app.projections import snapshot
+from app.session import require_session
 
 router = APIRouter(prefix="/api", tags=["live"])
 
@@ -26,7 +27,7 @@ def format_sse(data: dict, event_id: int | None) -> str:
     return f"{head}data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-@router.get("/live")
+@router.get("/live", dependencies=[Depends(require_session)])
 async def live(request: Request, viewer_id: str = Query(min_length=1)) -> StreamingResponse:
     engine = request.app.state.engine
     bus = request.app.state.bus
@@ -38,14 +39,21 @@ async def live(request: Request, viewer_id: str = Query(min_length=1)) -> Stream
     async def stream() -> AsyncIterator[str]:
         try:
             snap = snapshot(engine, viewer)
-            yield format_sse(snap, snap.pop("last_event_id", None))
+            cursor = snap.pop("cursor", 0)
+            yield format_sse(snap, cursor or None)
             while not await request.is_disconnected():
                 try:
-                    event = await asyncio.wait_for(sub.queue.get(), timeout=heartbeat)
+                    await asyncio.wait_for(sub.queue.get(), timeout=heartbeat)  # a wake-up, not the event itself
                 except TimeoutError:
                     yield format_sse({"type": "heartbeat"}, None)
                     continue
-                yield format_sse(event, event["id"])
+                # Read what is persisted past the cursor, in id order: no duplicates with the snapshot, no regressions,
+                # and a notification that arrives early or late changes nothing.
+                with Session(engine) as session:
+                    fresh = events_after(session, viewer, cursor)
+                    cursor = max(cursor, *(e["id"] for e in fresh)) if fresh else cursor
+                for event in fresh:
+                    yield format_sse(event, event["id"])
         finally:
             bus.unsubscribe(sub)
 

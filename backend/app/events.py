@@ -10,6 +10,7 @@ import asyncio
 import json
 import threading
 from dataclasses import dataclass, field
+from datetime import UTC
 
 from sqlalchemy import Engine
 from sqlmodel import Session, select
@@ -63,17 +64,23 @@ def visible_to(role: str, visibility: str) -> bool:
 
 
 def project_event(row: Event, role: str) -> dict:
-    """The flat event the dashboard receives. The contact never gets `request.text`."""
+    """The flat, schema-valid event for one role. The contact never gets `request.text`; the owner's request, which
+    carries the text, is labelled `visibility: owner` because that is the variant they receive."""
     payload = json.loads(row.payload_json)
-    if role == "contact" and row.type == "request":
-        payload.pop("text", None)
+    visibility = row.visibility
+    if row.type == "request":
+        if role == "contact":
+            payload.pop("text", None)
+        elif "text" in payload:
+            visibility = "owner"
+    at = row.at if row.at.tzinfo is not None else row.at.replace(tzinfo=UTC)
     return {
         **payload,
         "type": row.type,
         "id": row.id,
         "task_id": row.task_id,
-        "at": row.at.isoformat(),
-        "visibility": row.visibility,
+        "at": at.isoformat(),
+        "visibility": visibility,
     }
 
 
@@ -107,14 +114,15 @@ class EventBus:
             return len(self._subs)
 
     def publish(self, row: Event, owner_id: str) -> int:
-        """Deliver one persisted event to every subscriber allowed to see it. Returns how many were fed."""
+        """Wake every subscriber of this owner. The queue carries only the event id; the stream reads the persisted
+        events past its cursor in id order, so notifications may arrive late or out of order without harm."""
         with self._lock:
             subs = list(self._subs)
         fed = 0
         for sub in subs:
             if sub.viewer.owner_id != owner_id or not visible_to(sub.viewer.role, row.visibility):
                 continue
-            sub.loop.call_soon_threadsafe(sub.queue.put_nowait, project_event(row, sub.viewer.role))
+            sub.loop.call_soon_threadsafe(sub.queue.put_nowait, row.id)
             fed += 1
         return fed
 
@@ -145,3 +153,18 @@ def list_events(session: Session, task_id: str, viewer: Viewer) -> list[dict]:
     """Ordered events for one task, filtered by what the viewer's role may see."""
     rows = session.exec(select(Event).where(Event.task_id == task_id).order_by(Event.id)).all()
     return [project_event(row, viewer.role) for row in rows if visible_to(viewer.role, row.visibility)]
+
+
+def events_after(session: Session, viewer: Viewer, cursor: int) -> list[dict]:
+    """Every event of the viewer's owner with id > cursor, in id order, filtered by role. SQLite serialises writers,
+    so ids commit in order and a cursor never skips one."""
+    rows = session.exec(
+        select(Event).join(Task, Task.id == Event.task_id).where(Task.owner_id == viewer.owner_id, Event.id > cursor).order_by(Event.id)
+    ).all()
+    return [project_event(row, viewer.role) for row in rows if visible_to(viewer.role, row.visibility)]
+
+
+def last_event_id(session: Session, owner_id: str) -> int:
+    """The stream cursor at snapshot time: the highest event id across the owner's tasks, 0 when none."""
+    rows = session.exec(select(Event.id).join(Task, Task.id == Event.task_id).where(Task.owner_id == owner_id).order_by(Event.id.desc())).first()
+    return int(rows) if rows is not None else 0

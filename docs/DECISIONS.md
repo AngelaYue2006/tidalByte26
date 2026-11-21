@@ -33,6 +33,11 @@
 
 **What we show judges.** Redaction accuracy on a 20-utterance test set (fields kept, fields dropped), intake latency on device, bytes sent to the cloud per request, call-agent response latency, and the reason tags on the decision card.
 
+## Defaults taken while building (#9)
+
+- **Dashboard session cookie.** The docs name a shared session cookie but not its shape. Default: `GET /api/session` issues `lifeline_session = <nonce>.<hmac_sha256(nonce, DASHBOARD_SESSION_SECRET)>`, HttpOnly, SameSite=Lax; the read routes require it; development with no secret uses a random per-process secret, any other `APP_ENV` fails startup without one. The Next.js dashboard has to call `GET /api/session` once before opening the stream (frontend follow-up).
+- **Visibility semantics.** `owner` reaches the owner only, `contact` reaches both roles, `internal` reaches no dashboard; a viewer id that is a `contacts` row is that owner's contact, any other viewer id is an owner.
+
 ## Open items to verify at kickoff
 
 - Exact NVIDIA model IDs for Lightning and Super, and whether the chat endpoint supports `stream: true`.

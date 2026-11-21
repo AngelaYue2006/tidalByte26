@@ -80,13 +80,14 @@ Every external side effect (SMS, booking, calendar insert) is keyed by `task_id`
 | `POST` | `/api/tasks/{id}/approve` | `{actor_id, decision: "approve" or "reject", idempotency_key}` | owner only |
 | `POST` | `/api/contacts/offers` | `{task_id, contact_id, offer: {can_drive, pickup_time?}, idempotency_key}` | contact's dashboard reply |
 | `GET` | `/api/live` | `?viewer_id` | **SSE**: `snapshot` then events; viewer-scoped |
+| `GET` | `/api/session` | — | sets the `lifeline_session` cookie; the dashboard calls it once before any read |
 | `POST` | `/v1/chat/completions` | OpenAI chat format from ElevenLabs | custom LLM proxy to Lightning; streams; logs turns |
 | `POST` | `/api/webhooks/elevenlabs/post-call` | ElevenLabs payload | transcript + data collection → `call_result` |
 | `POST` | `/api/webhooks/twilio/sms` | Twilio form | signature check, allowlist, match `YES` or contact reply to the open task |
 | `POST` | `/api/demo/reset` | — | `APP_ENV=development` only; clears and reseeds |
 | `GET` | `/api/health` | — | adapter modes and versions, no secrets |
 
-Auth for the hackathon: one shared dashboard session cookie, `viewer_id` chosen on a role picker. Not production identity.
+Auth for the hackathon: one shared dashboard session cookie, `viewer_id` chosen on a role picker. Not production identity. `GET /api/session` issues `lifeline_session`, an HMAC-signed token under `DASHBOARD_SESSION_SECRET` (HttpOnly, SameSite=Lax); `GET /api/live` and `GET /api/tasks/{id}/events` answer 401 without a valid one. In development with no secret set the app signs with a random per-process secret.
 
 ## Live events (SSE) — the dashboard contract
 
@@ -165,6 +166,7 @@ APP_TIMEZONE=America/Chicago
 DATABASE_URL=sqlite:///./lifeline.db
 PUBLIC_BASE_URL=            # ngrok https URL for webhooks and the LLM proxy
 LLM_PROXY_SECRET=           # shared with the ElevenLabs agent config
+DASHBOARD_SESSION_SECRET=   # signs the lifeline_session cookie; random per process in development when empty
 NVIDIA_API_KEY=
 NEMOTRON_LIGHTNING_ID=      # verify on build.nvidia.com
 NEMOTRON_SUPER_ID=

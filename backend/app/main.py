@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app import session
 from app.config import Settings, load_settings
 from app.db import init_db, make_engine
 from app.events import EventBus
@@ -31,8 +33,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.bus = EventBus()
+    # Development without a configured secret gets a per-process one; validate_startup requires it elsewhere.
+    app.state.session_secret = settings.dashboard_session_secret or secrets.token_hex(32)
     app.state.heartbeat_seconds = live.HEARTBEAT_SECONDS
     app.include_router(demo.router)
+    app.include_router(session.router)
     app.include_router(live.router)
     app.include_router(tasks.router)
     return app

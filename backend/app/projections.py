@@ -7,7 +7,7 @@ import json
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from app.events import Viewer, list_events
+from app.events import Viewer, last_event_id, list_events
 from app.models import Call, Task
 
 
@@ -26,7 +26,7 @@ def call_projection(call: Call, meta: str | None = None) -> dict:
     }
 
 
-def task_projection(task: Task, calls: list[Call], events: list[dict], viewer: Viewer) -> dict:
+def project_task(task: Task, calls: list[Call], events: list[dict], viewer: Viewer) -> dict:
     """One task as the viewer may see it. `request_text` exists only in the owner variant."""
     request = next((e for e in events if e["type"] == "request"), None)
     metas = {e["call_id"]: e.get("meta") for e in events if e["type"] == "call_start"}
@@ -57,17 +57,18 @@ def latest_task(session: Session, owner_id: str) -> Task | None:
 
 
 def snapshot(engine: Engine, viewer: Viewer) -> dict:
-    """The first SSE message: the viewer's current task, its calls and the events they may see. `last_event_id` is the stream id."""
+    """The first SSE message: the viewer's current task, its calls and the events they may see. `cursor` is the owner's highest event id, the stream's starting point; it is popped before sending."""
     with Session(engine) as session:
+        cursor = last_event_id(session, viewer.owner_id)
         task = latest_task(session, viewer.owner_id)
         if task is None:
-            return {"type": "snapshot", "task": None, "calls": [], "events": [], "last_event_id": None}
+            return {"type": "snapshot", "task": None, "calls": [], "events": [], "cursor": cursor}
         events = list_events(session, task.id, viewer)
         calls = session.exec(select(Call).where(Call.task_id == task.id).order_by(Call.started_at, Call.id)).all()
         return {
             "type": "snapshot",
-            "task": task_projection(task, list(calls), events, viewer),
+            "task": project_task(task, list(calls), events, viewer),
             "calls": [call_projection(c) for c in calls],
             "events": events,
-            "last_event_id": events[-1]["id"] if events else None,
+            "cursor": cursor,
         }
