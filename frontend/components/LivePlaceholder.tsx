@@ -129,7 +129,7 @@ export default function LivePlaceholder() {
   const simple = density === "simple";
 
   return (
-    <main className={simple ? "live-main density-simple" : "live-main density-detailed"} key={density}>
+    <main className={simple ? "live-main density-simple" : "live-main density-detailed"}>
       <header className="page-hero card page-hero-live">
         <div className="page-hero-copy">
           <p className="page-kicker">In progress</p>
