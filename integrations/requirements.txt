@@ -7,3 +7,4 @@ httpx
 pydantic
 jsonschema
 pytest
+pytest-asyncio

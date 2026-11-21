@@ -60,3 +60,62 @@ window clipping, confirmed-only calendar receipts, repeat receipt identities,
 allowlist failures, inbound role mapping and shared-schema dashboard payloads.
 Sockets are forbidden throughout that suite. `scripts/check.sh` runs all repository
 checks; use an environment with Ruff, pytest and backend dependencies installed.
+
+## Scripted receptionists (#13)
+
+The mock keeps `voice_mock.start_call(call: CallSpec) -> CallHandle` and
+`voice_mock.confirm_booking(call: CallSpec, slot) -> Confirmation`. Both enforce
+`VOICE_MODE=mock` and `DEMO_PHONE_ALLOWLIST`, including for synthetic fixtures.
+No phone is dialed. Use explicit synthetic numbers in the process allowlist for
+local fixture tests; production/demo allowlists remain in the ignored `.env`.
+
+Bind a backend-owned callback around a pipeline run:
+
+```python
+async with voice_mock.callbacks(emit_voice_event) as session:
+    handles = [voice_mock.start_call(spec) for spec in call_specs]
+    offers = await asyncio.gather(*(session.wait_call(h) for h in handles))
+```
+
+`emit_voice_event(event)` receives the schema-shaped `call_status`, `transcript`
+and `call_result` dictionaries, each with `call_id` and `simulated: true`. It may
+be synchronous or asynchronous. The backend shim must route transcript turns
+through the same common recorder as the live proxy, attach the task and proper
+viewer visibility, and publish each event once. `events.emit` expects type
+separate from the payload, so the shim removes `type` before passing that payload.
+Do not have both the recorder and shim emit the same transcript twice.
+
+**Backend wiring is pending.** Main still has skeletons for the live proxy and
+event bus. Proposed PR #58 defines `record_turn(engine, call_id, speaker, text)`;
+PR #55 defines the event emitter. The simulator provides callback injection but
+does not invent a new HTTP endpoint or import/write backend state. A backend
+owner must supply the shared callback shim; a callback-spy test is not proof of
+end-to-end dashboard delivery. Keep #13 draft/blocked until that acceptance is
+verified against the landed backend callback.
+
+`start_call` returns immediately and schedules timed playback; the context exits
+only after playback finishes, or cancels pending tasks on failure/cancellation.
+The returned offer comes from structured fixture results, never transcript text.
+`slotOk` checks full slot containment in the supplied free windows. Clinic
+identity is matched by fixture place ID, not phone, so a safe teammate-number
+substitution can retain the same script. Unknown scripts and missing first-agent
+AI disclosures fail before any events. Timing follows fixture `at_ms` values,
+including the longer hold. All three calls share the event loop and overlap.
+
+Within one session, an identical call-ID/spec retry reuses its task and handle;
+a conflicting specification fails. Persisted receipts and idempotency across
+process/session restarts remain the backend's responsibility. Callback failures
+propagate through `wait_call` or context exit. Nested async contexts keep separate
+callbacks and task registries.
+
+Booking reads the fixture's structured `booking_reply` and only accepts the
+offered slot (label, aware ISO timestamp, Window or start/end mapping). Bright
+Smile/Smile Co. produce simulated confirmed receipts; Oak Dental produces the
+simulated tentative T7 variant without a confirmation reference. This method
+returns synthetic facts only; the backend must enforce the approval gate and
+never create a calendar event for tentative results.
+
+`python -m pytest -q integrations/tests/test_voice_mock.py` includes one real-time
+fixture test (about 15 seconds), plus fast callback, retry, allowlist, disclosure,
+slot-match, cancellation and tentative-receipt regressions. External networking
+is forbidden; Windows asyncio's internal loopback socket pair is allowed.
