@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
-from app.events import emit
+from app.events import emit, emit_many
 from app.models import Contact, Task
 from app.session import require_session
 
@@ -48,9 +48,19 @@ async def contact_offer(body: OfferBody, request: Request) -> dict:
         return pipeline.remember("contact_offer", body.task_id, body.idempotency_key, {"status": "awaiting_contact", "ride": "declined"})
     if not pipeline.claim_wait(body.task_id):
         raise HTTPException(status_code=409, detail="a ride for this task was already confirmed")
-    emit(engine, bus, body.task_id, "contact_reply", {"contact": first, "text": "I can drive.", "offer": body.offer.model_dump()}, "contact")
     pickup = body.offer.pickup_time or _default_pickup(booking_json)
-    emit(engine, bus, body.task_id, "ride_confirmed", {"driver": first, "pickup_time": pickup}, "contact")
+    # Reply and confirmation commit together; on failure the claim is released so the contact can retry.
+    try:
+        emit_many(
+            engine, bus, body.task_id,
+            [
+                ("contact_reply", {"contact": first, "text": "I can drive.", "offer": body.offer.model_dump()}, "contact"),
+                ("ride_confirmed", {"driver": first, "pickup_time": pickup}, "contact"),
+            ],
+        )
+    except Exception:
+        pipeline.release_wait(body.task_id)
+        raise
     pipeline.resume(body.task_id)
     return pipeline.remember("contact_offer", body.task_id, body.idempotency_key, {"status": "ride_confirmed", "pickup_time": pickup})
 

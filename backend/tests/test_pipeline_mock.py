@@ -310,3 +310,72 @@ def test_default_wiring_replays_the_fixture_without_the_simulator(monkeypatch):
     confirmation = bridge.confirm_booking(specs[0], {"slot_start": offers[0].slot_start.isoformat()})
     assert confirmation.status == "confirmed" and confirmation.simulated
     assert FixtureReplay(instant).confirm_booking(specs[2], {"slot_start": offers[2].slot_start.isoformat()}).status == "tentative"
+
+
+def _failing_once(module, name, monkeypatch):
+    """Replace module.name with a function that raises on its first call and delegates afterwards."""
+    real = getattr(module, name)
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("injected write failure")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, name, flaky)
+    return calls
+
+
+def test_failed_approval_write_releases_the_wait_for_a_retry(client, monkeypatch):
+    from app.routers import approvals
+
+    task_id = start(client)
+    wait_for(client, task_id, "awaiting_approval")
+    before = events(client, task_id)
+    _failing_once(approvals, "emit_many", monkeypatch)
+    with pytest.raises(RuntimeError, match="injected"):
+        client.post(f"/api/tasks/{task_id}/approve?viewer_id=mary", json={"actor_id": "mary", "decision": "approve", "idempotency_key": "k1"})
+    assert events(client, task_id) == before, "nothing half-written"
+    assert client.app.state.pipeline.waiting(task_id), "the wait is open again"
+    assert client.get(f"/api/tasks/{task_id}?viewer_id=mary").json()["status"] == "awaiting_approval"
+    retry = client.post(f"/api/tasks/{task_id}/approve?viewer_id=mary", json={"actor_id": "mary", "decision": "approve", "idempotency_key": "k1"})
+    assert retry.status_code == 200 and retry.json() == {"status": "approved", "applied": True}
+    wait_for(client, task_id, "awaiting_contact")
+    assert [e["type"] for e in events(client, task_id)].count("approved") == 1
+
+
+def test_failed_ride_write_leaves_no_partial_reply_and_allows_retry(client, monkeypatch):
+    from app.routers import contacts
+
+    task_id = start(client)
+    wait_for(client, task_id, "awaiting_approval")
+    client.post(f"/api/tasks/{task_id}/approve?viewer_id=mary", json={"actor_id": "mary", "decision": "approve", "idempotency_key": "ok"})
+    wait_for(client, task_id, "awaiting_contact")
+    before = events(client, task_id)
+    _failing_once(contacts, "emit_many", monkeypatch)
+    offer = {"task_id": task_id, "contact_id": "sarah", "offer": {"can_drive": True}, "idempotency_key": "ride"}
+    with pytest.raises(RuntimeError, match="injected"):
+        client.post("/api/contacts/offers?viewer_id=sarah", json=offer)
+    after = events(client, task_id)
+    assert after == before, "neither contact_reply nor ride_confirmed was written"
+    assert client.app.state.pipeline.waiting(task_id)
+    retry = client.post("/api/contacts/offers?viewer_id=sarah", json=offer)
+    assert retry.status_code == 200 and retry.json()["status"] == "ride_confirmed"
+    wait_for(client, task_id, "completed")
+    types = [e["type"] for e in events(client, task_id)]
+    assert types.count("contact_reply") == 1 and types.count("ride_confirmed") == 1
+    assert types.index("contact_reply") + 1 == types.index("ride_confirmed"), "the reply and the confirmation are adjacent: one transaction"
+
+
+def test_failed_reject_write_keeps_the_task_awaiting_and_retry_cancels(client, monkeypatch):
+    from app.routers import approvals
+
+    task_id = start(client)
+    wait_for(client, task_id, "awaiting_approval")
+    _failing_once(approvals, "emit_many", monkeypatch)
+    with pytest.raises(RuntimeError):
+        client.post(f"/api/tasks/{task_id}/approve?viewer_id=mary", json={"actor_id": "mary", "decision": "reject", "idempotency_key": "r"})
+    assert client.get(f"/api/tasks/{task_id}?viewer_id=mary").json()["status"] == "awaiting_approval", "the status change rolled back with the event"
+    assert client.post(f"/api/tasks/{task_id}/approve?viewer_id=mary", json={"actor_id": "mary", "decision": "reject", "idempotency_key": "r"}).json()["status"] == "cancelled"
+    wait_for(client, task_id, "cancelled")

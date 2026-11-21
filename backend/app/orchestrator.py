@@ -97,6 +97,10 @@ class Pipeline:
         self._claimed.add(task_id)
         return True
 
+    def release_wait(self, task_id: str) -> None:
+        """Give a claimed wait back after the reply's writes failed, so a retry can take it."""
+        self._claimed.discard(task_id)
+
     def resume(self, task_id: str) -> bool:
         """Release the wait a POST has satisfied. False when nothing is waiting for this task."""
         event = self._waits.get(task_id)

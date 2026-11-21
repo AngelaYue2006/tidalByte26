@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC
 
@@ -147,6 +148,46 @@ def emit(engine: Engine, bus: EventBus, task_id: str, type: str, payload: dict, 
         session.expunge(row)
     bus.publish(row, owner_id)
     return row
+
+
+def emit_many(
+    engine: Engine,
+    bus: EventBus,
+    task_id: str,
+    events: list[tuple[str, dict, str]],
+    before: Callable[[Session, Task], None] | None = None,
+) -> list[Event]:
+    """Persist several events (and an optional task change) in one transaction, then fan them out.
+
+    Either every row and the change commit together or nothing does, so a reply that produces two events can never
+    leave half of itself behind. `before(session, task)` runs inside the transaction, for a status transition.
+    """
+    for type_, payload, visibility in events:
+        if type_ not in EVENT_TYPES:
+            raise ValueError(f"unknown event type {type_!r}")
+        if visibility not in VISIBILITIES:
+            raise ValueError(f"unknown visibility {visibility!r}")
+        if "type" in payload:
+            raise ValueError("payload must not carry its own 'type'")
+    rows: list[Event] = []
+    with session_scope(engine) as session:
+        task = session.get(Task, task_id)
+        if task is None:
+            raise LookupError(f"no task {task_id!r}")
+        owner_id = task.owner_id
+        if before is not None:
+            before(session, task)
+        for type_, payload, visibility in events:
+            row = Event(task_id=task_id, type=type_, payload_json=json.dumps(payload, ensure_ascii=False), visibility=visibility)
+            session.add(row)
+            rows.append(row)
+        session.flush()
+        for row in rows:
+            session.refresh(row)
+            session.expunge(row)
+    for row in rows:
+        bus.publish(row, owner_id)
+    return rows
 
 
 def list_events(session: Session, task_id: str, viewer: Viewer, *, up_to: int | None = None) -> list[dict]:
