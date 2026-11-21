@@ -69,22 +69,52 @@ function createGate(handlers: LiveHandlers): StreamGate {
   return gate;
 }
 
+/** Fetch the dashboard session cookie once; the read routes require it. */
+export async function bootstrapSession(): Promise<void> {
+  try {
+    await fetch("/api/session", { credentials: "same-origin" });
+  } catch {
+    // The stream or poll will surface the failure.
+  }
+}
+
 function connectSse(viewerId: string, handlers: LiveHandlers): () => void {
   const gate = createGate(handlers);
-  const source = new EventSource(liveUrl(viewerId));
+  let source: EventSource | null = null;
+  let closed = false;
+  let gotMessage = false;
+  let rebootstrapped = false;
 
-  source.onmessage = (ev) => {
-    const payload = parsePayload(ev.data);
-    if (!isLiveEvent(payload)) return;
-    gate.apply(payload, ev.lastEventId || null);
+  const open = () => {
+    if (closed) return;
+    source = new EventSource(liveUrl(viewerId));
+
+    source.onmessage = (ev) => {
+      gotMessage = true;
+      const payload = parsePayload(ev.data);
+      if (!isLiveEvent(payload)) return;
+      gate.apply(payload, ev.lastEventId || null);
+    };
+
+    source.onerror = (err) => {
+      if (!gotMessage && !rebootstrapped) {
+        // First failure before any message: the session cookie was probably missing.
+        rebootstrapped = true;
+        source?.close();
+        void bootstrapSession().then(open);
+        return;
+      }
+      // Browser reconnects EventSource automatically; surface the error to the UI.
+      handlers.onError?.(err);
+    };
   };
 
-  source.onerror = (err) => {
-    // Browser reconnects EventSource automatically; surface the error to the UI.
-    handlers.onError?.(err);
-  };
+  void bootstrapSession().then(open);
 
-  return () => source.close();
+  return () => {
+    closed = true;
+    source?.close();
+  };
 }
 
 function connectPoll(
@@ -95,23 +125,32 @@ function connectPoll(
 ): () => void {
   const gate = createGate(handlers);
   let stopped = false;
+  let rebootstrapped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const tick = async () => {
     if (stopped) return;
+    timer = undefined;
     try {
       const payload = await getEvents(taskId, viewerId);
       for (const item of normalizeEventList(payload)) {
         gate.apply(item.event, item.id);
       }
     } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      if (!rebootstrapped && (text.includes("401") || text.includes("session required"))) {
+        rebootstrapped = true;
+        await bootstrapSession();
+        if (!stopped) timer = setTimeout(() => void tick(), 0);
+        return;
+      }
       handlers.onError?.(err);
     } finally {
-      if (!stopped) timer = setTimeout(() => void tick(), pollMs);
+      if (!stopped && !timer) timer = setTimeout(() => void tick(), pollMs);
     }
   };
 
-  void tick();
+  void bootstrapSession().then(tick);
 
   return () => {
     stopped = true;
