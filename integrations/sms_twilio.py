@@ -34,9 +34,10 @@ def send(to_e164, text, idempotency_key) -> MessageReceipt:
 
 
 def parse_inbound(form) -> InboundSms:
-    if _mode() == "live":
-        from integrations.sms_inbound import parse
+    from integrations.sms_inbound import SignedSMSForm, parse
 
+    # D16: outbound stays mock while a trusted live inbound request is signed.
+    if _mode() == "live" or isinstance(form, SignedSMSForm):
         return parse(form)
     # Mock input is synthetic, not an authenticated Twilio webhook.
     sender = form.get("From", "")

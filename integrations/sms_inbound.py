@@ -48,7 +48,7 @@ def webhook_url():
 
 def parse(form) -> InboundSms:
     if not isinstance(form, SignedSMSForm):
-        raise TypeError(
+        raise RuntimeError(  # noqa: TRY004 - caller handles untrusted runtime context with RuntimeError
             "Live SMS requires trusted webhook context, not bare POST fields"
         )
     token = os.getenv("TWILIO_AUTH_TOKEN", "")

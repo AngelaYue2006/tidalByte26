@@ -201,8 +201,12 @@ check the waiting task state and scope, durably deduplicate MessageSid, invoke
 approval/contact handling and return a fast 2xx/TwiML acknowledgement. The backend
 must map signature/allowlist failures to rejection without exposing request data
 or mutating task state. This PR never imports the backend or writes its files.
-The route in main remains a stub, so an actual YES/contact round trip is not yet
-verified and this PR stays draft/blocked. #7 also needs an owned SMS-capable sender.
+Main now has the approval webhook from #22, but it must wrap the actual request
+header/form and backend identities in SignedSMSForm before live validation can
+succeed. Bare live forms raise the RuntimeError its handler catches, returning a
+safe ignored result. #7 / PR #79 separately records the live trial send/receive;
+per the coordinator, #27 lands on code review and mock tests using that evidence,
+without claiming the separate backend YES/contact workflow is complete.
 
 Tests use synthetic forms, SDK signature generation and fake Twilio resources.
 The read-only live preflight found that the configured sender does not meet the
@@ -212,3 +216,13 @@ remain acceptance work after the account and backend dependencies are resolved.
 
 References: [Twilio request validation](https://www.twilio.com/docs/usage/security),
 [Messages resource](https://www.twilio.com/docs/messaging/api/message-resource).
+
+
+D16 compatibility: SMS_MODE=mock continues to simulate outbound messages. A
+trusted SignedSMSForm always uses live signature validation and returns a
+non-simulated inbound fact, even with SMS_MODE=mock. This supports the decided
+mock-outbound/live-inbound demo without sending custom trial SMS. A plain form
+cannot supply trusted signature or role context. The new-style trial's classic
+IncomingPhoneNumbers lookup result is not an outstanding #27 acceptance blocker:
+Joyce's delivered/received evidence and its limitations are recorded in #7/PR #79.
+The optional live outbound sender check remains strict; the demo keeps it off.

@@ -55,7 +55,7 @@ def test_signed_owner_and_contact_are_typed(sender, body, role):
 
 
 def test_plain_form_cannot_smuggle_signature_or_role():
-    with pytest.raises(TypeError, match="trusted webhook context"):
+    with pytest.raises(RuntimeError, match="trusted webhook context"):
         sms.parse_inbound(
             {
                 "From": OWNER,
@@ -186,3 +186,24 @@ def test_unknown_twilio_fields_are_included_in_signature():
     changed["FutureTwilioField"] = "tampered"
     with pytest.raises(RuntimeError, match="signature"):
         sms.parse_inbound(replace(original, parameters=changed))
+
+
+def test_d16_signed_inbound_stays_live_with_mock_outbound(monkeypatch):
+    monkeypatch.setenv("SMS_MODE", "mock")
+    incoming = sms.parse_inbound(envelope())
+    assert incoming.role == "owner" and incoming.simulated is False
+    outgoing = sms.send(OWNER, "Synthetic pick", "task:pick")
+    assert outgoing.simulated is True
+
+
+def test_merged_backend_safely_rejects_bare_live_form(monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "backend"))
+    from app.routers.webhooks import handle_inbound
+
+    # An accepted input would touch app.state; an untrusted one must not.
+    assert handle_inbound(SimpleNamespace(), {"From": OWNER, "Body": "YES"}) == {
+        "ok": False,
+        "ignored": "unverified_sender",
+    }
