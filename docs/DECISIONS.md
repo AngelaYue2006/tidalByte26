@@ -64,3 +64,12 @@
 | # | Topic | Decision | Why |
 |---|---|---|---|
 | D15 | Transcript visibility | `transcript` events stay visible to both roles (`visibility: contact`), as the Live events visibility rule and D6 say. The agent never utters a dropped field (T2 guards the redaction), so a receptionist has nothing sensitive to echo. As a belt-and-braces measure the contact projection (`app/events.py`, `screen_for_contact`) replaces identifier-shaped values in clinic lines (member IDs, phone numbers, dates of birth, street addresses) with `[removed]` using the on-device detector `intake_backstop.identifier_values`; the owner sees the line as spoken. | Keeps D6 (the contact sees the call cards) and product rule 4 (the contact gets their scope) without a second visibility class. Dropping clinic lines for the contact would reopen D6 and needs its own PR that edits this row. |
+
+## Defaults taken while building (#23)
+
+- **Nano writes the contact message from the full on-device record, and code checks it.** `local_intake.contact_message` gives Nano the owner record, the redacted intake, the spoken request and the appointment facts (all local), and accepts the text only if it carries the clinic, the time, the street address and a YES/NO instruction and none of: the owner's other identifiers, the carrier, money, identifier shapes, sensitive terms. Otherwise, or when Ollama is down, the templated `texts.contact_request_message` is sent. The `contact_message` metrics row records which (`source`) and why (`violations`, kinds only).
+- **A decline tells the owner.** Dashboard or SMS, "no" emits `contact_reply` plus an owner-only `task_updated {status: awaiting_contact, reason: CONTACT_DECLINED}` and one owner text; the task keeps waiting for a later offer (T10).
+- **An unknown sender's text is attached to the one waiting task.** When the sender is not a contact on file and exactly one task is `awaiting_contact`, the owner gets `task_updated {reason: UNVERIFIED_SENDER}` with no number and no text; with zero or several waiting tasks it is only logged (T9).
+- **A contact text that is neither yes nor no changes nothing.** Logged with its length; the contact can text again or use the dashboard. "No" wins when both words appear, so no false ride is confirmed.
+- **Inbound SMS replies reach the pipeline through `app.contact_replies.handle_contact_sms`.** The signed webhook (#22 in PR #80, signature from #27) calls it after its own signature, allowlist and `MessageSid` checks; it does not parse Twilio forms itself.
+

@@ -37,7 +37,15 @@ APPROVAL_WINDOW = timedelta(minutes=10)
 CALL_IDS = "abcdefghij"
 
 
-BOOKING_KEYS = ("clinic", "slot_start", "slot_end", "price", "status", "confirmation_ref", "calendar_event_id")
+BOOKING_KEYS = (
+    "clinic",
+    "slot_start",
+    "slot_end",
+    "price",
+    "status",
+    "confirmation_ref",
+    "calendar_event_id",
+)
 
 
 def booking_record(booking: Booking) -> dict:
@@ -83,7 +91,9 @@ class Pipeline:
     # ---- entry points -------------------------------------------------------------------------------------------
 
     def start(self, task_id: str, text: str) -> asyncio.Task:
-        task = asyncio.get_running_loop().create_task(self.run(task_id, text), name=f"pipeline:{task_id}")
+        task = asyncio.get_running_loop().create_task(
+            self.run(task_id, text), name=f"pipeline:{task_id}"
+        )
         self._tasks[task_id] = task
         return task
 
@@ -142,14 +152,24 @@ class Pipeline:
             self._fail(run, failure.code, str(failure))
         except Exception as exc:  # a bug or an adapter error: never a silent completed
             log.exception("pipeline %s crashed", task_id)
-            self._fail(run, "CALL_FAILED" if run.offers is None and run.specs else "INTERNAL_ERROR", f"{type(exc).__name__}: {exc}")
+            self._fail(
+                run,
+                "CALL_FAILED" if run.offers is None and run.specs else "INTERNAL_ERROR",
+                f"{type(exc).__name__}: {exc}",
+            )
         finally:
             self._tasks.pop(task_id, None)
 
     async def _intake(self, run: Run, text: str) -> None:
         self._set_status(run, "intake")
         try:
-            run.intake = await asyncio.to_thread(local_intake.redact, text, run.owner, model=self.deps.intake_model(), now=self._now(run))
+            run.intake = await asyncio.to_thread(
+                local_intake.redact,
+                text,
+                run.owner,
+                model=self.deps.intake_model(),
+                now=self._now(run),
+            )
         except local_intake.IntakeError as exc:
             raise PipelineFailure("INTAKE_INCOMPLETE", str(exc)) from exc
         with session_scope(self.engine) as session:
@@ -161,37 +181,97 @@ class Pipeline:
     def _calendar(self, run: Run) -> None:
         self._set_status(run, "calendar")
         intake = run.intake
-        run.windows = list(self.deps.free_windows(run.owner.id, intake.time_range.start, intake.time_range.end))
+        run.windows = list(
+            self.deps.free_windows(
+                run.owner.id, intake.time_range.start, intake.time_range.end
+            )
+        )
         with session_scope(self.engine) as session:
-            session.get(Task, run.task_id).windows_json = json.dumps([{"start": w.start.isoformat(), "end": w.end.isoformat()} for w in run.windows])
-        self._emit(run, "request", {"text": run.text, "chips": texts.chips(intake.care_type, intake.budget_max, intake.insurance_carrier, run.windows)}, "contact")
+            session.get(Task, run.task_id).windows_json = json.dumps(
+                [
+                    {"start": w.start.isoformat(), "end": w.end.isoformat()}
+                    for w in run.windows
+                ]
+            )
+        self._emit(
+            run,
+            "request",
+            {
+                "text": run.text,
+                "chips": texts.chips(
+                    intake.care_type,
+                    intake.budget_max,
+                    intake.insurance_carrier,
+                    run.windows,
+                ),
+            },
+            "contact",
+        )
 
     def _places(self, run: Run) -> None:
         self._set_status(run, "places")
         intake = run.intake
-        run.clinics = list(self.deps.find_clinics(intake.care_type, intake.search_area or "near home", 3))
+        run.clinics = list(
+            self.deps.find_clinics(
+                intake.care_type, intake.search_area or "near home", 3
+            )
+        )
         if not run.clinics:
-            raise PipelineFailure("NO_CLINICS_FOUND", f"No clinic offering {intake.care_type} was found near {intake.search_area or 'home'}.")
+            raise PipelineFailure(
+                "NO_CLINICS_FOUND",
+                f"No clinic offering {intake.care_type} was found near {intake.search_area or 'home'}.",
+            )
         origin = run.owner.home.address if run.owner.home else "near home"
         distances = {d.place_id: d for d in self.deps.drive(origin, run.clinics)}
-        wire_request = WireIntakeRequest(**intake.model_dump(exclude={"time_range"}), time_range=Window(start=intake.time_range.start, end=intake.time_range.end))
+        wire_request = WireIntakeRequest(
+            **intake.model_dump(exclude={"time_range"}),
+            time_range=Window(start=intake.time_range.start, end=intake.time_range.end),
+        )
         # One id per call, unique across tasks, used everywhere: the calls table, every event, the decision and the snapshot.
         run.specs = {}
         with session_scope(self.engine) as session:
             for letter, clinic in zip(CALL_IDS, run.clinics, strict=False):
                 call_id = f"{run.task_id[:8]}-{letter}"
                 distance = distances.get(clinic.place_id)
-                run.specs[call_id] = CallSpec(clinic=clinic, request=wire_request, windows=run.windows, call_id=call_id)
-                session.add(Call(id=call_id, task_id=run.task_id, clinic_name=clinic.name, clinic_phone=clinic.phone_e164,
-                                 distance_mi=distance.miles if distance else None, status="dialing", started_at=datetime.now(UTC)))
+                run.specs[call_id] = CallSpec(
+                    clinic=clinic,
+                    request=wire_request,
+                    windows=run.windows,
+                    call_id=call_id,
+                )
+                session.add(
+                    Call(
+                        id=call_id,
+                        task_id=run.task_id,
+                        clinic_name=clinic.name,
+                        clinic_phone=clinic.phone_e164,
+                        distance_mi=distance.miles if distance else None,
+                        status="dialing",
+                        started_at=datetime.now(UTC),
+                    )
+                )
         for call_id, spec in run.specs.items():
             distance = distances.get(spec.clinic.place_id)
-            meta = f"{distance.miles:g} mi · {distance.minutes:g} min" if distance else ""
-            self._emit(run, "call_start", {"call_id": call_id, "clinic": spec.clinic.name, "meta": meta, "simulated": spec.clinic.simulated}, "contact")
+            meta = (
+                f"{distance.miles:g} mi · {distance.minutes:g} min" if distance else ""
+            )
+            self._emit(
+                run,
+                "call_start",
+                {
+                    "call_id": call_id,
+                    "clinic": spec.clinic.name,
+                    "meta": meta,
+                    "simulated": spec.clinic.simulated,
+                },
+                "contact",
+            )
 
     async def _calling(self, run: Run) -> None:
         self._set_status(run, "calling")
-        offers = await self.deps.voice.call_clinics(list(run.specs.values()), lambda event: self._voice_event(run, event))
+        offers = await self.deps.voice.call_clinics(
+            list(run.specs.values()), lambda event: self._voice_event(run, event)
+        )
         run.offers = list(offers)
         if not run.offers:
             raise PipelineFailure("CALL_FAILED", "No clinic call produced an offer.")
@@ -212,71 +292,163 @@ class Pipeline:
             with session_scope(self.engine) as session:
                 call = session.get(Call, call_id)
                 if call is not None:
-                    call.result_json = json.dumps({k: event[k] for k in ("price", "slot", "insured", "slotOk") if k in event})
+                    call.result_json = json.dumps(
+                        {
+                            k: event[k]
+                            for k in ("price", "slot", "insured", "slotOk")
+                            if k in event
+                        }
+                    )
         self._emit(run, type_, event, "contact")
 
     async def _ranking(self, run: Run) -> None:
         self._set_status(run, "ranking")
         intake = run.intake
-        result = hard_rules(run.offers, run.windows, intake.budget_max, intake.insurance_carrier)
+        result = hard_rules(
+            run.offers, run.windows, intake.budget_max, intake.insurance_carrier
+        )
         if not result.ok:
             failure = no_eligible_offer(result)
             raise PipelineFailure(failure["code"], failure["message"])
-        priority = "the earliest appointment inside the free windows, then the lowest price"
+        priority = (
+            "the earliest appointment inside the free windows, then the lowest price"
+        )
         try:
             decision, _ = await asyncio.to_thread(
-                timed_rank, result.eligible, run.windows, priority, client=self.deps.rank_client(), all_offers=run.offers, carrier=intake.insurance_carrier
+                timed_rank,
+                result.eligible,
+                run.windows,
+                priority,
+                client=self.deps.rank_client(),
+                all_offers=run.offers,
+                carrier=intake.insurance_carrier,
             )
         except Exception as exc:
-            raise PipelineFailure("RANKING_FAILED", f"Ranking did not produce a decision: {exc}") from exc
-        run.winner = next(o for o in run.offers if o.call_id == decision["winner_call_id"])
+            raise PipelineFailure(
+                "RANKING_FAILED", f"Ranking did not produce a decision: {exc}"
+            ) from exc
+        run.winner = next(
+            o for o in run.offers if o.call_id == decision["winner_call_id"]
+        )
         with session_scope(self.engine) as session:
             session.get(Task, run.task_id).decision_json = json.dumps(decision)
-        self._emit(run, "decision", {"winner": decision["winner_call_id"], "title": f"Why Nemotron picked {run.winner.clinic}",
-                                     "reasons": decision["reasons"], "second": decision["second"], "tradeoff": decision["tradeoff"]}, "contact")
+        self._emit(
+            run,
+            "decision",
+            {
+                "winner": decision["winner_call_id"],
+                "title": f"Why Nemotron picked {run.winner.clinic}",
+                "reasons": decision["reasons"],
+                "second": decision["second"],
+                "tradeoff": decision["tradeoff"],
+            },
+            "contact",
+        )
 
     async def _await_approval(self, run: Run) -> bool:
         self._set_status(run, "awaiting_approval")
         winner = run.winner
         expires = self._now(run) + APPROVAL_WINDOW
-        self._emit(run, "approval_required", {"pick": {"clinic": winner.clinic, "slot": slot_label(winner.slot_start), "price": money(winner.price)},
-                                              "expires_at": expires.isoformat()}, "contact")
-        self._sms(run, run.owner.phone_e164, texts.approval_sms(winner.clinic, winner.slot_start, winner.price), "approval")
+        self._emit(
+            run,
+            "approval_required",
+            {
+                "pick": {
+                    "clinic": winner.clinic,
+                    "slot": slot_label(winner.slot_start),
+                    "price": money(winner.price),
+                },
+                "expires_at": expires.isoformat(),
+            },
+            "contact",
+        )
+        self._sms(
+            run,
+            run.owner.phone_e164,
+            texts.approval_sms(winner.clinic, winner.slot_start, winner.price),
+            "approval",
+        )
         await self._wait(run.task_id)
-        return self._status(run) == "awaiting_approval"  # a rejection moved it to cancelled
+        return (
+            self._status(run) == "awaiting_approval"
+        )  # a rejection moved it to cancelled
 
     def _booking(self, run: Run) -> None:
         self._set_status(run, "booking")
         winner = run.winner
         spec = run.specs[winner.call_id]
-        slot = {"slot_start": winner.slot_start.isoformat(), "slot_end": winner.slot_end.isoformat()}
+        slot = {
+            "slot_start": winner.slot_start.isoformat(),
+            "slot_end": winner.slot_end.isoformat(),
+        }
         confirmation = self.deps.voice.confirm_booking(spec, slot)
         if confirmation.status == "rejected":
-            raise PipelineFailure("BOOKING_REJECTED", f"{winner.clinic} did not confirm the appointment: {confirmation.evidence}")
+            raise PipelineFailure(
+                "BOOKING_REJECTED",
+                f"{winner.clinic} did not confirm the appointment: {confirmation.evidence}",
+            )
         address = spec.clinic.address
-        booking_fields = {"clinic": winner.clinic, "slot_start": winner.slot_start, "slot_end": winner.slot_end, "price": money(winner.price),
-                          "status": confirmation.status, "confirmation_ref": confirmation.confirmation_ref}
-        if "address" in Booking.model_fields:  # the calendar adapter (#28) reads the clinic address from the Booking once its type carries it
+        booking_fields = {
+            "clinic": winner.clinic,
+            "slot_start": winner.slot_start,
+            "slot_end": winner.slot_end,
+            "price": money(winner.price),
+            "status": confirmation.status,
+            "confirmation_ref": confirmation.confirmation_ref,
+        }
+        if (
+            "address" in Booking.model_fields
+        ):  # the calendar adapter (#28) reads the clinic address from the Booking once its type carries it
             booking_fields["address"] = address
         run.booking = Booking(**booking_fields)
         if confirmation.status == "confirmed":
-            receipt = self.deps.create_event(run.owner.id, run.booking, f"{run.task_id}:calendar")  # once, keyed by task
-            run.booking = run.booking.model_copy(update={"calendar_event_id": receipt.event_id})
-            payload = {"calendar": texts.calendar_card(winner.slot_start, winner.slot_end, address),
-                       "sms_user": texts.booked_sms(winner.clinic, winner.slot_start, winner.price, run.intake.insurance_carrier), "simulated": receipt.simulated}
+            receipt = self.deps.create_event(
+                run.owner.id, run.booking, f"{run.task_id}:calendar"
+            )  # once, keyed by task
+            run.booking = run.booking.model_copy(
+                update={"calendar_event_id": receipt.event_id}
+            )
+            payload = {
+                "calendar": texts.calendar_card(
+                    winner.slot_start, winner.slot_end, address
+                ),
+                "sms_user": texts.booked_sms(
+                    winner.clinic,
+                    winner.slot_start,
+                    winner.price,
+                    run.intake.insurance_carrier,
+                ),
+                "simulated": receipt.simulated,
+            }
         else:
-            payload = {"calendar": "", "sms_user": texts.tentative_sms(winner.clinic, winner.slot_start), "tentative": True, "simulated": confirmation.simulated}
+            payload = {
+                "calendar": "",
+                "sms_user": texts.tentative_sms(winner.clinic, winner.slot_start),
+                "tentative": True,
+                "simulated": confirmation.simulated,
+            }
         with session_scope(self.engine) as session:
-            session.get(Task, run.task_id).booking_json = json.dumps(booking_record(run.booking))
+            session.get(Task, run.task_id).booking_json = json.dumps(
+                booking_record(run.booking)
+            )
         receipt = self._sms(run, run.owner.phone_e164, payload["sms_user"], "booked")
-        payload["sms_user"] = receipt.text if receipt else ""  # only a text the adapter accepted is shown as sent
+        payload["sms_user"] = (
+            receipt.text if receipt else ""
+        )  # only a text the adapter accepted is shown as sent
         self._emit(run, "booked", payload, "contact")
 
     def _transport(self, run: Run) -> bool:
         """Step 8. Returns True when the contact must be asked for a ride."""
         self._set_status(run, "transport")
-        self._emit(run, "transport_check", {"status": "checking", "reason": "", "simulated": True}, "contact")
-        options = self.deps.transport_check(run.booking, {"needs_ride": run.intake.needs_ride})
+        self._emit(
+            run,
+            "transport_check",
+            {"status": "checking", "reason": "", "simulated": True},
+            "contact",
+        )
+        options = self.deps.transport_check(
+            run.booking, {"needs_ride": run.intake.needs_ride}
+        )
         with session_scope(self.engine) as session:
             session.get(Task, run.task_id).transport_json = options.model_dump_json()
         payload = options.dashboard_event()
@@ -290,12 +462,50 @@ class Pipeline:
             contacts = ensure_contacts(session, run.owner.id)
             contact = next((c for c in contacts if c.scope == "ride_requests"), None)
             if contact is None:
-                raise PipelineFailure("CONTACT_DECLINED", "No emergency contact is on file to ask for a ride.")
-            name, phone = contact.name, contact.phone_e164
+                raise PipelineFailure(
+                    "CONTACT_DECLINED",
+                    "No emergency contact is on file to ask for a ride.",
+                )
+            name, phone, relationship = (
+                contact.name,
+                contact.phone_e164,
+                contact.relationship,
+            )
         spec = run.specs[run.winner.call_id]
-        message = texts.contact_request_message(run.owner.name.split()[0], run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
-        self._sms(run, phone, message, "contact_request")
-        self._emit(run, "contact_request", {"contact": name.split()[0], "message": message}, "contact")
+        first = run.owner.name.split()[0]
+        facts = local_intake.ContactFacts(
+            first,
+            name.split()[0],
+            run.intake.care_type,
+            run.winner.clinic,
+            run.winner.slot_start,
+            spec.clinic.address,
+        )
+        template = texts.contact_request_message(
+            first,
+            run.intake.care_type,
+            run.winner.clinic,
+            run.winner.slot_start,
+            spec.clinic.address,
+        )
+        # Nano writes the scoped message on the device from the full record; the check falls back to the template (rule 4).
+        written = await asyncio.to_thread(
+            local_intake.contact_message,
+            run.owner,
+            run.intake,
+            facts,
+            relationship=relationship,
+            request_text=run.text,
+            template=template,
+            model=self.deps.intake_model(),
+        )
+        self._sms(run, phone, written.text, "contact_request")
+        self._emit(
+            run,
+            "contact_request",
+            {"contact": name.split()[0], "message": written.text},
+            "contact",
+        )
         await self._wait(run.task_id)
         return self._status(run) == "awaiting_contact"
 
@@ -308,18 +518,41 @@ class Pipeline:
             driver = contact.name.split()[0] if contact else None
             contact_phone = contact.phone_e164 if contact else None
         if run.intake.needs_ride:
-            sms_user = texts.ride_confirmed_sms_user(driver or "Your contact", winner.clinic, winner.slot_start)
-            sms_contact = texts.ride_confirmed_sms_contact(first, winner.clinic, winner.slot_start)
+            sms_user = texts.ride_confirmed_sms_user(
+                driver or "Your contact", winner.clinic, winner.slot_start
+            )
+            sms_contact = texts.ride_confirmed_sms_contact(
+                first, winner.clinic, winner.slot_start
+            )
         else:
-            sms_user = texts.booked_sms(winner.clinic, winner.slot_start, winner.price, run.intake.insurance_carrier)
-            sms_contact = texts.no_ride_needed_sms_contact(first, winner.clinic, winner.slot_start, spec.clinic.address)
+            sms_user = texts.booked_sms(
+                winner.clinic,
+                winner.slot_start,
+                winner.price,
+                run.intake.insurance_carrier,
+            )
+            sms_contact = texts.no_ride_needed_sms_contact(
+                first, winner.clinic, winner.slot_start, spec.clinic.address
+            )
         owner_receipt = self._sms(run, run.owner.phone_e164, sms_user, "final_owner")
-        contact_receipt = self._sms(run, contact_phone, sms_contact, "final_contact") if contact_phone else None
-        self._emit(run, "notified", {
-            "sms_contact": contact_receipt.text if contact_receipt else "",
-            "sms_user": owner_receipt.text if owner_receipt else "",
-            "simulated": bool((owner_receipt and owner_receipt.simulated) or (contact_receipt and contact_receipt.simulated)),
-        }, "contact")
+        contact_receipt = (
+            self._sms(run, contact_phone, sms_contact, "final_contact")
+            if contact_phone
+            else None
+        )
+        self._emit(
+            run,
+            "notified",
+            {
+                "sms_contact": contact_receipt.text if contact_receipt else "",
+                "sms_user": owner_receipt.text if owner_receipt else "",
+                "simulated": bool(
+                    (owner_receipt and owner_receipt.simulated)
+                    or (contact_receipt and contact_receipt.simulated)
+                ),
+            },
+            "contact",
+        )
         self._set_status(run, "completed")
 
     # ---- plumbing -------------------------------------------------------------------------------------------------
@@ -335,7 +568,9 @@ class Pipeline:
     def _set_status(self, run: Run, status: str) -> None:
         with session_scope(self.engine) as session:
             task = session.get(Task, run.task_id)
-            if task.status != status:  # a new task is created in `intake`; every later step is a real transition
+            if (
+                task.status != status
+            ):  # a new task is created in `intake`; every later step is a real transition
                 transition(task, status)
         self._emit(run, "task_updated", {"status": status}, "contact")
 
@@ -349,23 +584,52 @@ class Pipeline:
             task = session.get(Task, run.task_id)
             if task.status not in ("failed", "cancelled", "completed"):
                 transition(task, "failed")
-        self._emit(run, "task_updated", {"status": "failed", "reason": code, "message": message}, "contact")
+        self._emit(
+            run,
+            "task_updated",
+            {"status": "failed", "reason": code, "message": message},
+            "contact",
+        )
 
     def _emit(self, run: Run, type_: str, payload: dict, visibility: str) -> None:
         emit(self.engine, self.bus, run.task_id, type_, payload, visibility)
 
     def _sms(self, run: Run, to: str, text: str, step: str):
+        return self.send_sms(run.task_id, to, text, step)
+
+    def send_sms(self, task_id: str, to: str, text: str, step: str):
         """Send one text, keyed by task and step (the mock returns the same receipt for a repeat; live Twilio will too, #24).
 
         Returns the MessageReceipt, or None when the adapter refused: that is reported to the owner as a
         `task_updated` with reason `SMS_NOT_SENT`, and the text is never shown as sent (status from receipts).
         """
         try:
-            return self.deps.sms_send(to, text, f"{run.task_id}:{step}")
-        except (RuntimeError, OSError, ValueError) as exc:  # the adapters raise plain, readable errors
-            log.warning("sms %s for task %s not sent: %s", step, run.task_id, exc)
-            self._emit(run, "task_updated", {"status": self._status(run), "reason": "SMS_NOT_SENT", "message": f"{step}: {exc}"}, "owner")
+            return self.deps.sms_send(to, text, f"{task_id}:{step}")
+        except (
+            RuntimeError,
+            OSError,
+            ValueError,
+        ) as exc:  # the adapters raise plain, readable errors
+            log.warning("sms %s for task %s not sent: %s", step, task_id, exc)
+            with Session(self.engine) as session:
+                status = session.get(Task, task_id).status
+            emit(
+                self.engine,
+                self.bus,
+                task_id,
+                "task_updated",
+                {
+                    "status": status,
+                    "reason": "SMS_NOT_SENT",
+                    "message": f"{step}: {exc}",
+                },
+                "owner",
+            )
             return None
 
     def _now(self, run: Run) -> datetime:
-        return self.deps.now() if self.deps.now else datetime.now(ZoneInfo(run.owner.timezone))
+        return (
+            self.deps.now()
+            if self.deps.now
+            else datetime.now(ZoneInfo(run.owner.timezone))
+        )

@@ -122,7 +122,7 @@ SSE details: `id:` is the events-table id and increases per owner; the `snapshot
 ```python
 # nemotron (backend/app/nemotron/)
 local_intake.redact(utterance: str, user: UserRecord) -> IntakeRequest
-local_intake.contact_message(task: Task, contact: Contact) -> str
+local_intake.contact_message(owner: UserRecord, intake: IntakeRequest, facts: ContactFacts, *, relationship, request_text, template, model) -> ContactMessage  # on device; text checked, template fallback
 ranker.rank(offers: list[Offer], windows: list[Window], priority: str) -> Decision
 
 # integrations/
