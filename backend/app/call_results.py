@@ -13,11 +13,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Engine
-from sqlmodel import select
+from sqlalchemy import Engine, update
 
 from app.db import session_scope
-from app.events import EventBus, emit
+from app.events import EventBus
 from app.models import Call, Event, Task
 from app.nemotron.call_summary import CallSummary, SummaryError, summarize_call
 from app.nemotron.ranker import ChatJSON
@@ -29,7 +28,8 @@ WEEKDAYS = {name: i for i, names in enumerate([("mon", "monday"), ("tue", "tues"
                                                ("thu", "thur", "thurs", "thursday"), ("fri", "friday"), ("sat", "saturday"), ("sun", "sunday")])
             for name in names}
 _TIME = re.compile(r"(?<!\d)(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?(?!\d)", re.IGNORECASE)
-_PRICE = re.compile(r"\$?\s*(\d{1,5}(?:\.\d{1,2})?)")
+# One unambiguous quote only: "$95", "95", "95.50 dollars", "USD 120". A range, several numbers or prose is missing.
+_PRICE = re.compile(r"^(?:usd\s*|\$\s*)?(\d{1,5}(?:\.\d{1,2})?)\s*(?:usd|dollars?|bucks)?\.?$", re.IGNORECASE)
 _YES = {"yes", "true", "y", "accepted", "accepts", "in network", "in-network", "covered", "takes it"}
 _NO = {"no", "false", "n", "not accepted", "out of network", "out-of-network", "declined", "does not", "doesn't"}
 SLOT_MINUTES = 60
@@ -52,9 +52,10 @@ def collected_value(raw: object) -> str | None:
 
 
 def parse_price(text: str | None) -> float | None:
+    """A single quoted amount, or None. "between $95 and $175" is not a price; Super reads the transcript instead."""
     if not text:
         return None
-    m = _PRICE.search(text.replace(",", ""))
+    m = _PRICE.match(text.strip().replace(",", ""))
     return float(m.group(1)) if m else None
 
 
@@ -156,10 +157,28 @@ def result_json(facts: CallFacts, windows: list[Window]) -> dict:
     }
 
 
-def has_result_event(engine: Engine, call_id: str) -> bool:
+def _finalize(engine: Engine, bus: EventBus, call: Call, task: Task, stored: dict, events: list[tuple[str, dict]]) -> bool:
+    """Claim the call and write its terminal state and event rows in ONE transaction, then publish.
+
+    The claim is a conditional UPDATE (status != done); only the delivery whose UPDATE hits a row writes the events, so
+    two concurrent deliveries cannot both emit, and a failure before commit leaves nothing for a retry to repair."""
     with session_scope(engine) as session:
-        rows = session.exec(select(Event).where(Event.type == "call_result")).all()
-        return any(json.loads(r.payload_json).get("call_id") == call_id for r in rows)
+        claimed = session.exec(
+            update(Call)
+            .where(Call.id == call.id, Call.status != "done")
+            .values(status="done", result_json=json.dumps(stored), ended_at=datetime.now(UTC))
+        ).rowcount
+        if claimed != 1:
+            return False
+        rows = [Event(task_id=task.id, type=kind, payload_json=json.dumps(payload, ensure_ascii=False), visibility="contact") for kind, payload in events]
+        session.add_all(rows)
+        session.flush()
+        for row in rows:
+            session.refresh(row)
+            session.expunge(row)
+    for row in rows:
+        bus.publish(row, task.owner_id)
+    return True
 
 
 def record_call_result(
@@ -174,8 +193,8 @@ def record_call_result(
     timezone: str,
     super_client: ChatJSON | None,
 ) -> dict:
-    """Store the structured result and emit call_result (only when complete) and call_status done. Idempotent per call."""
-    if has_result_event(engine, call.id) or (call.status == "done" and call.result_json):
+    """Store the structured result and emit call_result (only when complete) and call_status done, atomically and once per call."""
+    if call.status == "done":
         return {"duplicate": True}
     tz = ZoneInfo(timezone)
     facts = facts_from_collection(collection, call_date=call_date, tz=tz)
@@ -189,31 +208,23 @@ def record_call_result(
                 log.warning("call %s: %s", call.id, exc)
     windows = windows_from_json(task.windows_json)
     stored = result_json(facts, windows)
-    with session_scope(engine) as session:
-        row = session.get(Call, call.id)
-        row.result_json = json.dumps(stored)
-        row.status = "done"
-        row.ended_at = datetime.now(UTC)
-        session.add(row)
+    events: list[tuple[str, dict]] = []
     if facts.complete:
-        emit(engine, bus, task.id, "call_result",
-             {"call_id": call.id, "price": stored["price"], "slot": stored["slot"], "insured": stored["insured"], "slotOk": stored["slotOk"]},
-             visibility="contact")
+        events.append(("call_result", {"call_id": call.id, "price": stored["price"], "slot": stored["slot"], "insured": stored["insured"], "slotOk": stored["slotOk"]}))
     else:
         log.warning("call %s ended without a complete offer (source=%s); no call_result emitted", call.id, stored["source"])
-    emit(engine, bus, task.id, "call_status", {"call_id": call.id, "status": "done"}, visibility="contact")
+    events.append(("call_status", {"call_id": call.id, "status": "done"}))
+    if not _finalize(engine, bus, call, task, stored, events):
+        return {"duplicate": True}
     return {"duplicate": False, "complete": facts.complete, "source": stored["source"]}
 
 
 def record_call_failure(engine: Engine, bus: EventBus, call: Call, task: Task, reason: str) -> dict:
-    """call_initiation_failure: the clinic was busy, did not answer, or the call never connected."""
+    """call_initiation_failure: the clinic was busy, did not answer, or the call never connected. Same atomic claim."""
     if call.status == "done":
         return {"duplicate": True}
-    with session_scope(engine) as session:
-        row = session.get(Call, call.id)
-        row.result_json = json.dumps({"error": "CALL_FAILED", "reason": reason})
-        row.status = "done"
-        row.ended_at = datetime.now(UTC)
-        session.add(row)
-    emit(engine, bus, task.id, "call_status", {"call_id": call.id, "status": "done", "error": "CALL_FAILED", "reason": reason}, visibility="contact")
+    stored = {"error": "CALL_FAILED", "reason": reason}
+    event = ("call_status", {"call_id": call.id, "status": "done", "error": "CALL_FAILED", "reason": reason})
+    if not _finalize(engine, bus, call, task, stored, [event]):
+        return {"duplicate": True}
     return {"duplicate": False, "error": "CALL_FAILED", "reason": reason}

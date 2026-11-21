@@ -126,14 +126,12 @@ def test_verify_signature_matches_the_vendor_scheme():
         verify_signature(raw, "t=1700000000", "s3cret", now=1_700_000_100)
 
 
-def test_unsigned_is_accepted_only_in_development_without_a_secret():
+def test_no_configured_secret_fails_closed_even_in_development():
     dev = create_app(load_settings(env_file=None, environ={k: v for k, v in ENV.items() if k != "ELEVENLABS_WEBHOOK_SECRET"}))
     with TestClient(dev) as c:
-        assert c.post("/api/webhooks/elevenlabs/post-call", json={"type": "other"}).status_code == 200
-    prod = create_app(load_settings(env_file=None, environ={**{k: v for k, v in ENV.items() if k != "ELEVENLABS_WEBHOOK_SECRET"},
-                                                           "APP_ENV": "production", "DASHBOARD_SESSION_SECRET": "x" * 32}))
-    with TestClient(prod) as c:
-        assert c.post("/api/webhooks/elevenlabs/post-call", json={"type": "other"}).status_code == 503
+        r = c.post("/api/webhooks/elevenlabs/post-call", json={"type": "post_call_transcription"})
+        assert r.status_code == 503
+        assert "ELEVENLABS_WEBHOOK_SECRET" in r.json()["detail"]
 
 
 # --- happy path from data collection -------------------------------------------------------------------
@@ -165,6 +163,19 @@ def test_matching_falls_back_to_the_dynamic_variable_call_id(client, app):
     assert external_ref == "conv-b"  # learned from the webhook
 
 
+def test_dynamic_call_id_never_rebinds_a_call_owned_by_another_conversation(client, app):
+    post(client, payload(conversation_id="conv-a", call_id="call-a"))  # call-a finalised under conv-a
+    r = post(client, payload({"price": "$1", "slot": "Mon 8:00", "insured": "no"}, conversation_id="conv-other", call_id="call-a"))
+    assert r.status_code == 200
+    assert len(events(app, "call_result")) == 1
+    assert call(app)[1]["price_usd"] == 95.0 and call(app)[2] == "conv-a"
+    # and a still-live call bound elsewhere is left alone too
+    with session_scope(app.state.engine) as s:
+        s.add(Call(id="call-c", task_id="task-1", clinic_name="Oak Dental", clinic_phone="+15555550113", status="live", external_ref="conv-c"))
+    post(client, payload(conversation_id="conv-x", call_id="call-c"))
+    assert call(app, "call-c")[0] == "live"
+
+
 def test_unknown_conversation_is_ignored_with_200(client, app):
     r = post(client, payload(conversation_id="conv-zzz", call_id="call-zzz"))
     assert r.status_code == 200
@@ -188,7 +199,79 @@ def test_duplicate_webhook_creates_no_second_call_result(client, app):
     assert call(app)[1]["price_usd"] == 95.0
 
 
+def test_concurrent_duplicate_deliveries_finalize_once(tmp_path, monkeypatch):
+    import threading
+
+    app = create_app(load_settings(env_file=None, environ={**ENV, "DATABASE_URL": f"sqlite:///{tmp_path}/t8.db"}))
+    app.state.super_client = FakeSuper()
+    with TestClient(app) as c:
+        with session_scope(app.state.engine) as s:
+            s.add(Task(id="task-1", owner_id="mary", status="calling", windows_json=json.dumps(WINDOWS)))
+            s.add(Call(id="call-a", task_id="task-1", clinic_name="Bright Smile Dental", clinic_phone="+15555550111", status="live", external_ref="conv-a"))
+        barrier = threading.Barrier(6)
+        results = []
+
+        def deliver():
+            barrier.wait()
+            results.append(post(c, payload()).status_code)
+
+        threads = [threading.Thread(target=deliver) for _ in range(6)]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        assert results == [200] * 6
+        assert len(events(app, "call_result")) == 1
+        assert len(events(app, "call_status")) == 1
+
+
+def test_failed_finalization_leaves_nothing_and_a_retry_completes(client, app, monkeypatch):
+    real_publish = app.state.bus.publish
+    calls = {"n": 0}
+
+    def flaky_publish(row, owner_id):
+        calls["n"] += 1
+        return real_publish(row, owner_id)
+
+    # Fail inside the transaction: the event rows and the terminal call state must both roll back.
+    original = call_results.Event
+
+    class Boom(Exception):
+        pass
+
+    def exploding_event(**kwargs):
+        raise Boom("disk full while writing the event row")
+
+    monkeypatch.setattr(call_results, "Event", exploding_event)
+    with pytest.raises(Boom):
+        call_results.record_call_result(app.state.engine, app.state.bus, *_call_and_task(app), {"price": "$95", "slot": "Thu 9:30", "insured": "yes"},
+                                        [], call_date=CALL_DATE, timezone="America/Chicago", super_client=None)
+    assert call(app)[0] == "live" and call(app)[1] is None and events(app) == []
+    monkeypatch.setattr(call_results, "Event", original)
+    monkeypatch.setattr(app.state.bus, "publish", flaky_publish)
+    post(client, payload())
+    assert len(events(app, "call_result")) == 1 and len(events(app, "call_status")) == 1
+    assert calls["n"] == 2 and call(app)[0] == "done"
+
+
+def _call_and_task(app):
+    with session_scope(app.state.engine) as s:
+        c, t = s.get(Call, "call-a"), s.get(Task, "task-1")
+        s.expunge(c)
+        s.expunge(t)
+        return c, t
+
+
 # --- Super fallback ------------------------------------------------------------------------------------
+
+
+def test_a_price_range_is_treated_as_missing_and_super_decides(client, app):
+    app.state.super_client = FakeSuper(json.dumps({"price_usd": 140, "insured": True, "slot_start": "2026-11-26T09:30:00-06:00",
+                                                   "slot_end": "2026-11-26T10:30:00-06:00", "slot_label": "Thu 9:30"}))
+    post(client, payload({"price": "between $95 and $175", "slot": "Thu 9:30", "insured": "yes"}))
+    (result,) = events(app, "call_result")
+    assert result[2]["price"] == "$140"  # the figure Super read from the transcript, not the low end of the range
+    assert len(app.state.super_client.calls) == 1
 
 
 def test_missing_fields_are_filled_by_super_from_the_transcript(client, app):
@@ -260,7 +343,12 @@ def test_call_initiation_failure_marks_the_call_done_with_call_failed(client, ap
 # --- parsers -----------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("text,expected", [("$95", 95.0), ("95 dollars", 95.0), ("$1,200.50", 1200.5), ("ninety-five", None), ("", None), (None, None)])
+@pytest.mark.parametrize(
+    "text,expected",
+    [("$95", 95.0), ("95 dollars", 95.0), ("$1,200.50", 1200.5), ("USD 120", 120.0), ("95.", 95.0),
+     ("between $95 and $175", None), ("$95 to $175", None), ("$95 for adults, $60 for kids", None), ("around 95", None),
+     ("ninety-five", None), ("", None), (None, None)],
+)
 def test_parse_price(text, expected):
     assert parse_price(text) == expected
 

@@ -3,7 +3,7 @@
 Only the ElevenLabs post-call handler is here (#21). Twilio SMS belongs to #22 and #23.
 Order of checks: signature (ElevenLabs-Signature, HMAC-SHA256 over "<t>.<raw body>", 30-minute window),
 then the event type, then the call it belongs to (conversation_id -> calls.external_ref, falling back to the
-dynamic variable call_id), then the per-call idempotency check inside call_results. The reply is 200 as soon
+dynamic variable call_id), then the atomic per-call claim inside call_results. The reply is 200 as soon
 as the payload is accepted; the work runs as a background task so ElevenLabs never retries a slow handler.
 """
 
@@ -60,17 +60,27 @@ def sign(raw_body: bytes, secret: str, *, at: int | None = None) -> str:
     return f"t={t},v0=" + hmac.new(secret.encode(), f"{t}.".encode() + raw_body, hashlib.sha256).hexdigest()
 
 
+class ConversationMismatch(Exception):
+    """The dynamic call_id names a call already bound to a different conversation."""
+
+
 def find_call(engine: Engine, conversation_id: str | None, dynamic_call_id: str | None) -> tuple[Call, Task] | None:
+    """conversation_id -> calls.external_ref. The dynamic call_id only binds a call that has no external_ref yet;
+    a call already bound to another conversation is never touched (ConversationMismatch)."""
     with session_scope(engine) as session:
         call = None
         if conversation_id:
             call = session.exec(select(Call).where(Call.external_ref == conversation_id)).first()
         if call is None and dynamic_call_id:
-            call = session.get(Call, dynamic_call_id)
-            if call is not None and conversation_id and not call.external_ref:
-                call.external_ref = conversation_id
-                session.add(call)
-                session.flush()
+            candidate = session.get(Call, dynamic_call_id)
+            if candidate is not None:
+                if candidate.external_ref and candidate.external_ref != conversation_id:
+                    raise ConversationMismatch(f"call {dynamic_call_id!r} belongs to conversation {candidate.external_ref!r}, not {conversation_id!r}")
+                if conversation_id and not candidate.external_ref:
+                    candidate.external_ref = conversation_id
+                    session.add(candidate)
+                    session.flush()
+                call = candidate
         if call is None:
             return None
         task = session.get(Task, call.task_id)
@@ -111,7 +121,11 @@ def process_post_call(engine: Engine, bus: EventBus, settings: Settings, payload
     data = payload.get("data") or {}
     conversation_id = data.get("conversation_id")
     dynamic = ((data.get("conversation_initiation_client_data") or {}).get("dynamic_variables") or {})
-    found = find_call(engine, conversation_id, dynamic.get("call_id"))
+    try:
+        found = find_call(engine, conversation_id, dynamic.get("call_id"))
+    except ConversationMismatch as exc:
+        log.warning("post-call webhook rejected: %s", exc)
+        return {"ok": False, "ignored": "conversation_mismatch"}
     if found is None:
         log.warning("post-call webhook for unknown conversation %r; ignored", conversation_id)
         return {"ok": False, "ignored": "unknown_conversation"}
@@ -132,12 +146,9 @@ async def elevenlabs_post_call(request: Request, background: BackgroundTasks) ->
     settings: Settings = request.app.state.settings
     raw = await request.body()
     secret = settings.elevenlabs_webhook_secret
-    if secret:
-        verify_signature(raw, request.headers.get(SIGNATURE_HEADER), secret)
-    elif settings.is_development:
-        log.warning("ELEVENLABS_WEBHOOK_SECRET is unset; accepting an unsigned post-call webhook in development")
-    else:
-        raise HTTPException(503, "ELEVENLABS_WEBHOOK_SECRET is not set")
+    if not secret:
+        raise HTTPException(503, "ELEVENLABS_WEBHOOK_SECRET is not set; the mock voice adapter signs with the same secret")
+    verify_signature(raw, request.headers.get(SIGNATURE_HEADER), secret)
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
