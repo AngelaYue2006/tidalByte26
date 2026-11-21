@@ -12,7 +12,8 @@ import time
 from collections.abc import Callable, Iterator
 from typing import Protocol
 
-from app.nemotron.call_prompt import CallSpec, call_agent_prompt
+from app.nemotron.prompts import call_agent
+from app.nemotron.types import CallSpec
 
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 MAX_REPLY_TOKENS = 120  # a phone turn is one or two sentences
@@ -52,7 +53,7 @@ class LightningClient:
 
 def build_messages(spec: CallSpec, incoming: list[dict]) -> list[dict]:
     """Our system prompt first, then the conversation ElevenLabs sent, minus any system prompt of its own."""
-    return [{"role": "system", "content": call_agent_prompt(spec)}] + [
+    return [{"role": "system", "content": call_agent(spec)}] + [
         {"role": m["role"], "content": m.get("content") or ""} for m in incoming if m.get("role") != "system"
     ]
 

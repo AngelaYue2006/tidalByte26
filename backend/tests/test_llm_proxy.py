@@ -9,12 +9,8 @@ from app.db import session_scope
 from app.main import create_app
 from app.models import Call, Task, Turn
 from app.nemotron.call_agent import LightningClient, build_messages, delta_text, relay
-from app.nemotron.call_prompt import (
-    OPENING_LINE,
-    CallSpec,
-    call_agent_prompt,
-    window_label,
-)
+from app.nemotron.prompts import OPENING_LINE, call_agent, window_label
+from app.nemotron.types import CallSpec
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
@@ -52,6 +48,8 @@ def chunk(text, finish=None):
 
 
 class FakeLightning:
+    model_id = "nvidia/lightning-test"
+
     def __init__(self, *pieces):
         self.pieces = list(pieces) or ["Yes. ", "Do you take ", "Delta Dental?"]
         self.requests: list[list[dict]] = []
@@ -82,10 +80,16 @@ def body(*, messages=None, extra=None, stream=True, **overrides):
 
 
 @pytest.fixture
-def app():
+def metrics_file(tmp_path, monkeypatch):
+    path = tmp_path / "metrics.jsonl"
+    monkeypatch.setenv("METRICS_PATH", str(path))
+    return path
+
+
+@pytest.fixture
+def app(metrics_file):
     app = create_app(load_settings(env_file=None, environ=ENV))
     app.state.lightning_client = FakeLightning()
-    app.state.first_token_latencies = []
     return app
 
 
@@ -202,11 +206,15 @@ def test_first_turn_without_a_clinic_line_writes_only_the_agent(client, app):
     assert [t[1] for t in turns(app)] == ["agent"]
 
 
-def test_first_token_latency_is_recorded(client, app):
+def test_first_token_latency_is_one_metrics_row_with_numbers_only(client, metrics_file):
     client.post("/v1/chat/completions", json=body())
-    (record,) = app.state.first_token_latencies
-    assert record["call_id"] == "call-a"
-    assert 0 <= record["seconds"] < 5
+    (line,) = metrics_file.read_text().splitlines()
+    row = json.loads(line)
+    assert row["kind"] == "call_agent"
+    assert row["call_id"] == "call-a"
+    assert row["model"] == "nvidia/lightning-test"
+    assert isinstance(row["first_token_ms"], int) and 0 <= row["first_token_ms"] < 5000
+    assert "Delta" not in line and "text" not in row
 
 
 def test_non_streaming_request_returns_a_chat_completion(client, app):
@@ -237,8 +245,8 @@ def test_upstream_gets_our_prompt_and_only_redacted_facts(client, app):
 
 
 def test_prompt_discloses_ai_and_never_books():
-    spec = CallSpec("c", "t", "Oak Dental", "dental cleaning", None, None, [(datetime(2026, 11, 26, 8, tzinfo=UTC), datetime(2026, 11, 26, 12, tzinfo=UTC))])
-    prompt = call_agent_prompt(spec)
+    spec = CallSpec(call_id="c", task_id="t", clinic_name="Oak Dental", care_type="dental cleaning", windows=[(datetime(2026, 11, 26, 8, tzinfo=UTC), datetime(2026, 11, 26, 12, tzinfo=UTC))])
+    prompt = call_agent(spec)
     assert prompt.count(OPENING_LINE) == 1
     assert "You are an AI" in prompt
     assert "Never book" in prompt
@@ -248,7 +256,7 @@ def test_prompt_discloses_ai_and_never_books():
 
 
 def test_build_messages_drops_vendor_system_prompt_and_keeps_order():
-    spec = CallSpec("c", "t", "Oak Dental", "dental cleaning", 150, "Delta Dental", [])
+    spec = CallSpec(call_id="c", task_id="t", clinic_name="Oak Dental", care_type="dental cleaning", budget_max=150, insurance_carrier="Delta Dental")
     out = build_messages(spec, [{"role": "system", "content": "vendor"}, {"role": "user", "content": "hello"}, {"role": "assistant", "content": None}])
     assert [m["role"] for m in out] == ["system", "user", "assistant"]
     assert out[2]["content"] == ""

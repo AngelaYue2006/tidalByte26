@@ -4,8 +4,8 @@ Correction verified in #6 (docs/ELEVENLABS.md): `call_id` and the secret arrive 
 in the request body (what the voice adapter passed as `custom_llm_extra_body` when it started the call),
 not in dynamic variables. The `Authorization: Bearer` header is accepted for the same secret as a fallback.
 
-Transcript events wait for app.events (#9); first-token latency goes to a hook on app.state until
-metrics.py (#10) merges. Both are wired in this router once those land.
+Transcript events wait for app.events (#9) and are wired here once it lands. First-token latency is one
+`call_agent` row in metrics.jsonl per proxy turn (app.metrics.record_first_token).
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import Engine
 from sqlmodel import func, select
 
+from app import metrics
 from app.config import MissingSetting, Settings
 from app.db import session_scope
 from app.models import Call, Task, Turn
@@ -32,7 +33,7 @@ from app.nemotron.call_agent import (
     collect,
     relay,
 )
-from app.nemotron.call_prompt import CallSpec
+from app.nemotron.types import CallSpec
 
 log = logging.getLogger("lifeline.llm_proxy")
 router = APIRouter(tags=["llm-proxy"])
@@ -120,11 +121,16 @@ def record_turn(engine: Engine, call_id: str, speaker: str, text: str) -> Turn |
 
 
 def record_first_token(request: Request, call_id: str, seconds: float) -> None:
-    """First-token latency for the Nemotron metrics. Collected on app.state until metrics.py (#10) merges."""
-    log.info("call_agent first token call_id=%s seconds=%.3f", call_id, seconds)
-    sink = getattr(request.app.state, "first_token_latencies", None)
-    if isinstance(sink, list):
-        sink.append({"call_id": call_id, "seconds": round(seconds, 4), "at": time.time()})
+    """First-token latency for the Nemotron metrics: one call_agent row in metrics.jsonl, numbers only."""
+    settings: Settings = request.app.state.settings
+    client = getattr(request.app.state, "lightning_client", None)
+    model = getattr(client, "model_id", None) or settings.nemotron_lightning_id or "unknown"
+    first_token_ms = round(seconds * 1000)
+    log.info("call_agent first token call_id=%s first_token_ms=%d", call_id, first_token_ms)
+    try:
+        metrics.record_first_token(model=model, call_id=call_id, first_token_ms=first_token_ms)
+    except OSError as exc:  # a metrics file that cannot be written must never break a live call
+        log.warning("could not write metrics row: %s", exc)
 
 
 def lightning_client(request: Request) -> ChatStream:

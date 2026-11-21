@@ -1,6 +1,8 @@
-"""Nemotron input and output types: UserRecord (on-device only), IntakeRequest and TimeRange (mirror shared/intake_request.schema.json)."""
+"""Nemotron input and output types: UserRecord (on-device only), IntakeRequest and TimeRange (mirror shared/intake_request.schema.json), CallSpec (one clinic call, redacted)."""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,3 +63,17 @@ class UserRecord(BaseModel):
     dob: str | None = None
     home: HomeLocation | None = None
     insurance: Insurance | None = None
+
+
+class CallSpec(BaseModel):
+    """What the call agent may know on one call (routers/llm_proxy.py builds it from the calls and tasks rows). Everything here is already redacted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    call_id: str
+    task_id: str
+    clinic_name: str
+    care_type: str
+    budget_max: int | float | None = None
+    insurance_carrier: str | None = None
+    windows: list[tuple[datetime, datetime]] = Field(default_factory=list)
