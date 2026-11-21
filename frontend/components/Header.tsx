@@ -1,69 +1,35 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { IconCalendarCheck } from "@tabler/icons-react";
-import { Suspense } from "react";
-import DensityToggle from "@/components/DensityToggle";
-import RolePicker from "@/components/RolePicker";
-import { VIEWER_QUERY, hrefWithViewer, roleFromViewerId, VIEWERS } from "@/lib/viewer";
+import { workspaceMode } from "@/lib/workspace";
 
-function NavLinks() {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const viewerId = VIEWERS[roleFromViewerId(searchParams.get(VIEWER_QUERY))].viewerId;
-  const search = searchParams.toString();
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { IconActivityHeartbeat } from "@tabler/icons-react";
+import RolePicker from "./RolePicker";
+import WorkspaceLink from "./WorkspaceLink";
 
-  const liveHref = hrefWithViewer("/", search, viewerId);
-  const historyHref = hrefWithViewer("/history", search, viewerId);
-  const calendarHref = hrefWithViewer("/calendar", search, viewerId);
-
-  return (
-    <nav className="header-links" aria-label="Primary">
-      <Link
-        href={liveHref}
-        className="header-pill"
-        aria-current={pathname === "/" ? "page" : undefined}
-      >
-        Live
-      </Link>
-      <Link
-        href={historyHref}
-        className="header-pill"
-        aria-current={pathname === "/history" || pathname.startsWith("/history/") ? "page" : undefined}
-      >
-        History
-      </Link>
-      <Link
-        href={calendarHref}
-        className="header-pill"
-        aria-current={pathname === "/calendar" ? "page" : undefined}
-      >
-        Calendar
-      </Link>
-    </nav>
-  );
-}
-
-/** LifeLine header: brand, nav pills, density toggle, role picker. */
 export default function Header() {
-  return (
-    <header className="site-header">
-      <Link href="/" className="brand">
-        <IconCalendarCheck aria-hidden stroke={1.75} />
-        LifeLine
-      </Link>
-      <div className="header-nav">
-        <Suspense fallback={<span className="faint">…</span>}>
-          <NavLinks />
-        </Suspense>
-        <Suspense fallback={<span className="faint">…</span>}>
-          <DensityToggle />
-        </Suspense>
-        <Suspense fallback={<span className="faint">Loading role…</span>}>
-          <RolePicker />
-        </Suspense>
-      </div>
-    </header>
-  );
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const router = useRouter();
+  const mode = workspaceMode(params);
+  function switchMode(next: string) {
+    const query = new URLSearchParams(params.toString());
+    query.delete("preview");
+    query.set("workspace", next);
+    router.push(`/?${query}`);
+  }
+  return <header className="site-header">
+    <WorkspaceLink href="/" className="brand"><IconActivityHeartbeat aria-hidden stroke={1.75}/>LifeLine</WorkspaceLink>
+    <nav className="header-links" aria-label="Primary">
+      {[["/", "Activity"], ["/history", "History"], ["/calendar", "Calendar"]].map(([path, label]) =>
+        <WorkspaceLink key={path} href={path} className="header-pill"
+          aria-current={pathname === path || pathname.startsWith(path + "/") ? "page" : undefined}>{label}</WorkspaceLink>)}
+    </nav>
+    <div className="header-settings">
+      <label className="role-picker"><span>Mode</span><select aria-label="Dashboard mode" value={mode} onChange={e => switchMode(e.target.value)}>
+        <option value="demo">Demo</option><option value="live">Live</option>{mode === "sample" && <option value="sample">Sample</option>}
+      </select></label>
+      <RolePicker/>
+    </div>
+  </header>;
 }
