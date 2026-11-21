@@ -17,6 +17,7 @@ from typing import Protocol
 
 from jsonschema import Draft202012Validator
 
+from app import metrics
 from app.nemotron.rank_prompt import (
     RANKING_SYSTEM,
     ranking_user_message,
@@ -189,8 +190,10 @@ def rank(
     return decision
 
 
-def timed_rank(*args, **kwargs) -> tuple[dict, float]:
-    """rank() plus wall-clock seconds, for the ranking-latency metric."""
+def timed_rank(offers: list[OfferLike], *args, client: ChatJSON, **kwargs) -> tuple[dict, float]:
+    """rank() plus wall-clock seconds; records the ranking-latency metric (model, latency_ms, offers)."""
     start = time.perf_counter()
-    decision = rank(*args, **kwargs)
-    return decision, time.perf_counter() - start
+    decision = rank(offers, *args, client=client, **kwargs)
+    seconds = time.perf_counter() - start
+    metrics.record_ranking(getattr(client, "model_id", type(client).__name__), round(seconds * 1000), len(offers))
+    return decision, seconds

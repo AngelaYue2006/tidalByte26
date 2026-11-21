@@ -134,6 +134,10 @@ class LeakyModel(PerfectModel):
 
 @pytest.fixture(autouse=True)
 def metrics_file(tmp_path, monkeypatch):
+    """Tests write metrics to a scratch file. A live run (LIFELINE_LIVE_INTAKE=1) keeps METRICS_PATH so the
+    redaction rows land in the real metrics.jsonl for scripts/metrics_summary.py."""
+    if os.environ.get("LIFELINE_LIVE_INTAKE") == "1":
+        return Path(os.environ.get("METRICS_PATH", "metrics.jsonl"))
     path = tmp_path / "metrics.jsonl"
     monkeypatch.setenv("METRICS_PATH", str(path))
     return path
@@ -190,15 +194,20 @@ def test_leaky_model_is_scrubbed(row):
     Draft202012Validator(SCHEMA).validate(request.model_dump())
 
 
-def test_report_fields_kept_and_dropped(capsys):
-    """The T2 report: per utterance, which fields were kept and which kinds were dropped."""
+def test_report_fields_kept_and_dropped(capsys, metrics_file):
+    """The T2 report: per utterance, which fields were kept and which kinds were dropped. Each row is also scored into
+    metrics.jsonl (kind `redaction`, model `perfect-stub`) so `scripts/metrics_summary.py` has the shape it reads."""
     lines = []
     for row in ROWS:
-        request = run(row, PerfectModel(row))
+        model = PerfectModel(row)
+        request = run(row, model)
         kept = [k for k, v in request.model_dump(exclude={"dropped_fields"}).items() if v not in (None, "")]
         lines.append(f"{row['id']}: kept {','.join(kept)}; dropped {','.join(request.dropped_fields) or '-'}")
+        scored = metrics.record_redaction(model.name, row["id"], row["expected"], row["expected_dropped"], request.model_dump())
+        assert scored["kept_correct"] == scored["kept_expected"] == 6 and scored["dropped_correct"] == scored["dropped_expected"], row["id"]
     print("\nT2 redaction report\n" + "\n".join(lines))
     assert len(lines) == len(ROWS)
+    assert sum(1 for line in metrics_file.read_text().splitlines() if '"kind": "redaction"' in line) == len(ROWS)
 
 
 def test_raw_text_is_never_logged_above_debug(caplog):
@@ -428,6 +437,7 @@ def test_live_nano_on_the_fixture_set(capsys):
         request = run(row, client)
         assert_no_leak(row, request)
         got = request.model_dump()
+        metrics.record_redaction(client.name, row["id"], row["expected"], row["expected_dropped"], got)  # for the pitch table
         for key in hits:
             if key == "dropped_fields":
                 hits[key] += set(got[key]) == set(row["expected_dropped"])
@@ -436,3 +446,4 @@ def test_live_nano_on_the_fixture_set(capsys):
             else:
                 hits[key] += got[key] == row["expected"][key]
     print("\nLive Nano accuracy over", len(ROWS), "utterances:", {k: f"{v}/{len(ROWS)}" for k, v in hits.items()})
+    print("Then: python scripts/metrics_summary.py", os.environ.get("METRICS_PATH", "metrics.jsonl"))
