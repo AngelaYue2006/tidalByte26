@@ -13,6 +13,8 @@ from fastapi import APIRouter, Request, Response
 router = APIRouter(prefix="/api/webhooks/twilio", tags=["webhooks"])
 log = logging.getLogger("lifeline.sms")
 
+# Empty TwiML is Twilio's documented "take no action" reply. A trial account logs error 12300 against it
+# ("Direct TwiML XML is not supported during response" in the trial docs); the message is still received.
 EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
 
 

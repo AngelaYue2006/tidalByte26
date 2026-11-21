@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -19,10 +20,23 @@ from app.routers import approvals, contacts, demo, live, requests, tasks, twilio
 VERSION = "0.1.0"
 
 
+def configure_logging() -> None:
+    """uvicorn configures only its own loggers; without a root handler, app INFO lines (events, webhooks) vanish."""
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO, format="%(levelname)s:     %(name)s %(message)s"
+        )
+
+
 def create_app(settings: Settings | None = None, deps: Deps | None = None) -> FastAPI:
     """Build the app. Settings come from .env unless a test passes them in. Startup fails loudly on a missing live value."""
     settings = settings or load_settings()
     settings.validate_startup()
+    if not logging.getLogger().handlers:
+        # uvicorn configures only its own loggers; without this, app INFO lines (events, webhooks) vanish.
+        logging.basicConfig(
+            level=logging.INFO, format="%(levelname)s:     %(name)s %(message)s"
+        )
     engine = make_engine(settings.database_url)
 
     @asynccontextmanager
@@ -36,10 +50,14 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     app.state.engine = engine
     app.state.bus = EventBus()
     # Development without a configured secret gets a per-process one; validate_startup requires it elsewhere.
-    app.state.session_secret = settings.dashboard_session_secret or secrets.token_hex(32)
+    app.state.session_secret = settings.dashboard_session_secret or secrets.token_hex(
+        32
+    )
     app.state.heartbeat_seconds = live.HEARTBEAT_SECONDS
     app.state.pipeline = Pipeline(deps or build_deps(settings), engine, app.state.bus)
-    app.state.inbound_sms_seen = set()  # MessageSids already answered; the stub's idempotency key
+    app.state.inbound_sms_seen = (
+        set()
+    )  # MessageSids already answered; the stub's idempotency key
     app.include_router(demo.router)
     app.include_router(session.router)
     app.include_router(live.router)

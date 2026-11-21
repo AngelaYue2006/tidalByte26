@@ -4,7 +4,7 @@ import logging
 
 import pytest
 from app.config import load_settings
-from app.main import create_app
+from app.main import configure_logging, create_app
 from app.routers.twilio_sms import record_inbound
 from fastapi.testclient import TestClient
 
@@ -81,3 +81,20 @@ def test_record_inbound_checks_allowlist_before_remembering_the_sid():
         record_inbound(seen, (OWNER,), {"MessageSid": "SM4", "From": OWNER})["outcome"]
         == "duplicate"
     )
+
+
+def test_app_loggers_reach_a_handler_under_a_bare_server():
+    """uvicorn configures only its own loggers; create_app gives the root logger a handler so evidence lines are not dropped."""
+    root = logging.getLogger()
+    saved_handlers, saved_level = root.handlers[:], root.level
+    root.handlers[:] = []
+    root.setLevel(logging.WARNING)
+    try:
+        configure_logging()
+        assert root.handlers
+        assert logging.getLogger("lifeline.sms").getEffectiveLevel() <= logging.INFO
+    finally:
+        for handler in root.handlers[:]:
+            root.removeHandler(handler)
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
