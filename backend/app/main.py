@@ -14,7 +14,7 @@ from app.config import Settings, load_settings
 from app.db import init_db, make_engine
 from app.events import EventBus
 from app.orchestrator import Pipeline
-from app.routers import approvals, contacts, demo, live, requests, tasks
+from app.routers import approvals, contacts, demo, live, requests, tasks, webhooks
 
 VERSION = "0.1.0"
 
@@ -38,7 +38,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     # Development without a configured secret gets a per-process one; validate_startup requires it elsewhere.
     app.state.session_secret = settings.dashboard_session_secret or secrets.token_hex(32)
     app.state.heartbeat_seconds = live.HEARTBEAT_SECONDS
-    app.state.pipeline = Pipeline(deps or build_deps(settings), engine, app.state.bus)
+    app.state.pipeline = Pipeline(deps or build_deps(settings), engine, app.state.bus, approval_timeout_s=settings.approval_timeout_min * 60)
     app.include_router(demo.router)
     app.include_router(session.router)
     app.include_router(live.router)
@@ -46,6 +46,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     app.include_router(requests.router)
     app.include_router(approvals.router)
     app.include_router(contacts.router)
+    app.include_router(webhooks.router)
     return app
 
 

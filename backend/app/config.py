@@ -53,6 +53,7 @@ class MissingSetting(Exception):
 class Settings(BaseModel):
     app_env: str = "development"
     app_timezone: str = "America/Chicago"
+    approval_timeout_min: float = 10.0  # one reminder SMS after this; then the task keeps waiting (T6)
     database_url: str = "sqlite:///./lifeline.db"
     public_base_url: str | None = None
     llm_proxy_secret: str | None = None

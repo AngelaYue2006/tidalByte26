@@ -33,7 +33,7 @@ from integrations.types import IntakeRequest as WireIntakeRequest
 
 log = logging.getLogger(__name__)
 
-APPROVAL_WINDOW = timedelta(minutes=10)
+DEFAULT_APPROVAL_TIMEOUT_S = 10 * 60  # settings.approval_timeout_min wins; this is the fallback for a bare Pipeline()
 CALL_IDS = "abcdefghij"
 
 
@@ -69,10 +69,11 @@ class Run:
 
 
 class Pipeline:
-    def __init__(self, deps: Deps, engine: Engine, bus: EventBus) -> None:
+    def __init__(self, deps: Deps, engine: Engine, bus: EventBus, approval_timeout_s: float = DEFAULT_APPROVAL_TIMEOUT_S) -> None:
         self.deps = deps
         self.engine = engine
         self.bus = bus
+        self.approval_timeout_s = approval_timeout_s
         self._waits: dict[str, asyncio.Event] = {}
         self._claimed: set[str] = set()
         self._tasks: dict[str, asyncio.Task] = {}
@@ -236,13 +237,18 @@ class Pipeline:
                                      "reasons": decision["reasons"], "second": decision["second"], "tradeoff": decision["tradeoff"]}, "contact")
 
     async def _await_approval(self, run: Run) -> bool:
+        """Step 6: the one user gate. SMS the pick, wait; after approval_timeout_s send one reminder, then wait as long as it takes (T6)."""
         self._set_status(run, "awaiting_approval")
         winner = run.winner
-        expires = self._now(run) + APPROVAL_WINDOW
+        expires = self._now(run) + timedelta(seconds=self.approval_timeout_s)
         self._emit(run, "approval_required", {"pick": {"clinic": winner.clinic, "slot": slot_label(winner.slot_start), "price": money(winner.price)},
                                               "expires_at": expires.isoformat()}, "contact")
         self._sms(run, run.owner.phone_e164, texts.approval_sms(winner.clinic, winner.slot_start, winner.price), "approval")
-        await self._wait(run.task_id)
+        if not await self._wait(run.task_id, timeout=self.approval_timeout_s):
+            self._sms(run, run.owner.phone_e164, texts.approval_reminder_sms(winner.clinic, winner.slot_start, winner.price), "approval_reminder")
+            self._emit(run, "task_updated", {"status": "awaiting_approval", "reason": "APPROVAL_TIMEOUT",
+                                             "message": "No answer yet; one reminder was sent. Still waiting for Approve or YES."}, "owner")
+            await self._wait(run.task_id)
         return self._status(run) == "awaiting_approval"  # a rejection moved it to cancelled
 
     def _booking(self, run: Run) -> None:
@@ -324,13 +330,21 @@ class Pipeline:
 
     # ---- plumbing -------------------------------------------------------------------------------------------------
 
-    async def _wait(self, task_id: str) -> None:
+    async def _wait(self, task_id: str, timeout: float | None = None) -> bool:
+        """Block until a POST or SMS releases this task. With a timeout, return False when nothing came in time and keep
+        the wait registered so the answer can still arrive; True means the wait was released and is now closed."""
         event = self._waits.setdefault(task_id, asyncio.Event())
-        try:
+        if timeout is None:
             await event.wait()
-        finally:
-            self._waits.pop(task_id, None)
-            self._claimed.discard(task_id)
+        else:
+            try:
+                await asyncio.wait_for(event.wait(), timeout)
+            except TimeoutError:
+                if not event.is_set():
+                    return False
+        self._waits.pop(task_id, None)
+        self._claimed.discard(task_id)
+        return True
 
     def _set_status(self, run: Run, status: str) -> None:
         with session_scope(self.engine) as session:
