@@ -42,18 +42,20 @@ async def live(request: Request, viewer_id: str = Query(min_length=1)) -> Stream
             cursor = snap.pop("cursor", 0)
             yield format_sse(snap, cursor or None)
             while not await request.is_disconnected():
+                woke = True
                 try:
                     await asyncio.wait_for(sub.queue.get(), timeout=heartbeat)  # a wake-up, not the event itself
                 except TimeoutError:
-                    yield format_sse({"type": "heartbeat"}, None)
-                    continue
+                    woke = False
                 # Read what is persisted past the cursor, in id order: no duplicates with the snapshot, no regressions,
-                # and a notification that arrives early or late changes nothing.
+                # and a notification that arrives early, late or not at all (a lost wake-up) changes nothing but timing.
                 with Session(engine) as session:
                     fresh = events_after(session, viewer, cursor)
                     cursor = max(cursor, *(e["id"] for e in fresh)) if fresh else cursor
                 for event in fresh:
                     yield format_sse(event, event["id"])
+                if not woke and not fresh:
+                    yield format_sse({"type": "heartbeat"}, None)
         finally:
             bus.unsubscribe(sub)
 
