@@ -66,5 +66,13 @@ The import failed at step 5 with ElevenLabs' error that the number was **"not fo
 | **Upgrade Twilio and buy a number** | Upgrade the account (card on file), buy one SMS- and voice-capable local number, set it as `TWILIO_PHONE_NUMBER`, repeat the import above, record `ELEVENLABS_PHONE_NUMBER_ID`, re-point Twilio's SMS webhook for the new number at `PUBLIC_BASE_URL/api/webhooks/twilio/sms`. Custom-text SMS from a fresh, unregistered 10DLC number is still carrier-filtered (error 30034) until A2P registration, which takes days, so outbound SMS stays mock either way. | Live outbound calls over ElevenLabs with Nemotron Lightning answering: the #26 first live call and the demo's three parallel calls. |
 | **Cut live calls, `VOICE_MODE=mock`** | Nothing to buy. The scripted receptionist simulator (#13) drives the three call cards with the same events, labelled `simulated: true`; the replay prototype carries the synthesized voices for the pitch. #26 and the live half of this issue close as not done. | The demo runs end to end today on mock voice, mock outbound SMS and live inbound SMS; the ElevenLabs track story rests on the agent, the custom-LLM proxy and the post-call webhook, all verified against the live agent without a number. |
 
-Until the decision: `ELEVENLABS_PHONE_NUMBER_ID` stays empty in `.env`, `VOICE_MODE=mock`, and the acceptance items for the import and the test call in #67 stay unchecked.
+### Outcome (2026-11-21, later the same day): path one, taken
+
+- **Twilio upgraded and a number bought.** A local number with voice and SMS ($1.15/month); the compliance profile was approved. A2P 10DLC is **not** registered, so custom outbound text from it would be carrier-filtered: outbound SMS stays `SMS_MODE=mock` for the demo (the owner's decision recorded in PR #79, D16 once #80 lands). Inbound SMS stays live.
+- **Import succeeded** with the steps above, Enable inbound SMS **OFF**. The number is assigned to the `LifeLine` agent.
+- **Recorded in the root `.env` only:** the new `TWILIO_PHONE_NUMBER` and `ELEVENLABS_PHONE_NUMBER_ID`. They exist; their values appear nowhere else.
+- **Webhooks on the number, Twilio Console:** "A message comes in" → `PUBLIC_BASE_URL/api/webhooks/twilio/sms`, HTTP POST (our backend, so a YES or a contact's reply still reaches us); "A call comes in" → ElevenLabs' inbound-call URL, set by the import. Do not point the voice webhook back at the backend; the agent answers calls.
+- **Still open:** one test call from the ElevenLabs dashboard to an allowlisted teammate phone, with the post-call webhook firing at `PUBLIC_BASE_URL/api/webhooks/elevenlabs/post-call` (#21 is on main, so a 200 is expected). It runs when the owner okays it; the outcome goes here and into #67.
+
+The trial finding above stays as history: a new-style Twilio trial cannot be imported into ElevenLabs and cannot send custom text, so a team that wants live calls must upgrade before kickoff ends.
 
