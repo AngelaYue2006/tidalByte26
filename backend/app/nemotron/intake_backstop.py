@@ -197,3 +197,41 @@ def identifier_values(utterance: str) -> list[str]:
         if re.search(r"\d", m.group(0)):
             values.append(m.group(0))
     return [v for v in values if not re.fullmatch(r"live (?:at|on)", v, re.IGNORECASE)]
+
+
+# Words that name a symptom, condition, body part, mobility aid or medication. A fail-closed check on what leaves
+# the device, not the redactor itself: Nano drops these; this catches the case where it did not.
+SENSITIVE_WORDS: frozenset[str] = frozenset(
+    {
+        "pain", "ache", "toothache", "headache", "hurt", "hurts", "hurting", "sore", "swelling", "swollen", "bleeding",
+        "fever", "cough", "dizzy", "dizziness", "nausea", "infection", "infected", "cavity", "broken", "fracture",
+        "spasm", "spasms", "spasming", "mole", "rash", "diabetes", "diabetic", "cancer", "tumor", "pacemaker", "stroke",
+        "dementia", "alzheimer", "arthritis", "depression", "anxiety", "pregnant", "hiv", "chest", "knee", "hip",
+        "shoulder", "stomach", "throat", "ear", "lump", "wound", "injury", "injured", "symptom", "symptoms", "diagnosed",
+        "walker", "wheelchair", "cane", "crutches", "fall", "fell", "fallen",
+        "insulin", "aspirin", "ibuprofen", "tylenol", "advil", "vicodin", "warfarin", "metformin", "lisinopril",
+        "prednisone", "xanax", "oxycodone", "morphine", "medication", "medications", "pills", "prescription",
+    }
+)
+_DRUG_SUFFIX = re.compile(r"\b\w{3,}(?:mycin|cillin|pril|statin|formin|olol|prazole|sartan|azepam|oxetine|dipine|tidine|vir|mab)\b", re.IGNORECASE)
+_CARE_TYPE_CUT = re.compile(r"\s+(?:for|because|due to|since|with|as|after|about|regarding)\s+|[,;:(\-]", re.IGNORECASE)
+
+
+def normalise_care_type(text: str) -> str:
+    """Keep the appointment kind and nothing after it: "dental cleaning for a toothache" -> "dental cleaning".
+
+    Lowercase, cut at the first connective or punctuation, letters and hyphens only, at most four words.
+    Returns "" when nothing usable is left.
+    """
+    head = _CARE_TYPE_CUT.split(text.strip().lower(), maxsplit=1)[0]
+    words = [w for w in re.findall(r"[a-z]+(?:-[a-z]+)?", head) if w not in {"a", "an", "the", "my", "me"}]
+    return " ".join(words[:4])
+
+
+def unsafe_terms(text: str, extra_values: list[str] = ()) -> list[str]:
+    """Sensitive words, drug-like words and any of extra_values (the owner's own identifiers) present in text."""
+    low = text.lower()
+    found = [w for w in re.findall(r"[a-z]+(?:-[a-z]+)?", low) if w in SENSITIVE_WORDS]
+    found += [m.group(0) for m in _DRUG_SUFFIX.finditer(low)]
+    found += [v for v in extra_values if v and len(v) >= 3 and v.lower() in low]
+    return found

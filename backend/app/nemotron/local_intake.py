@@ -9,6 +9,7 @@ import re
 import time
 from datetime import datetime
 from typing import Protocol
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -33,15 +34,32 @@ class IntakeModel(Protocol):
     def complete_json(self, system: str, user: str, schema: dict) -> dict: ...
 
 
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
+
+
+def assert_local_ollama_url(base_url: str) -> str:
+    """The raw utterance goes to this URL. It must be this machine: loopback or a *.localhost name."""
+    parsed = urlparse(base_url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in {"http", "https"} or not (host in _LOCAL_HOSTS or host.endswith(".localhost")):
+        raise IntakeError(
+            "OLLAMA_BASE_URL must point at this machine (localhost, 127.0.0.1, ::1 or *.localhost); "
+            f"refusing to send intake text to {host or base_url!r}"
+        )
+    return base_url.rstrip("/")
+
+
 class OllamaClient:
-    """The only network client in this module. Talks to OLLAMA_BASE_URL and nowhere else."""
+    """The only network client in this module. Talks to a local OLLAMA_BASE_URL and nowhere else, ignoring proxies."""
 
     def __init__(self, base_url: str, model_tag: str | None, timeout_s: float = 60.0) -> None:
         if not model_tag:
             raise IntakeError("NEMOTRON_NANO_TAG is not set; the intake model has no default")
-        self.base_url = base_url.rstrip("/")
+        self.base_url = assert_local_ollama_url(base_url)
         self.name = model_tag
         self.timeout_s = timeout_s
+        # trust_env=False: no HTTP(S)_PROXY from the environment can route the request off the machine.
+        self._http = httpx.Client(base_url=self.base_url, trust_env=False, timeout=timeout_s)
 
     def complete_json(self, system: str, user: str, schema: dict) -> dict:
         body = {
@@ -52,7 +70,7 @@ class OllamaClient:
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
         try:
-            response = httpx.post(f"{self.base_url}/api/chat", json=body, timeout=self.timeout_s)
+            response = self._http.post("/api/chat", json=body)
             response.raise_for_status()
         except httpx.ConnectError as exc:
             raise IntakeError(f"Ollama is not reachable at {self.base_url}; start it with `ollama run <tag>`") from exc
@@ -90,7 +108,7 @@ def redact(utterance: str, user: UserRecord, *, model: IntakeModel | None = None
         raise IntakeError(f"{INTAKE_INCOMPLETE}: model returned no object")
 
     request = _merge(utterance, proposal, now)
-    request = _scrub_leaks(utterance, request)
+    request = _validate_outgoing(utterance, user, request)
     total_ms = round((time.perf_counter() - started) * 1000)
     metrics.record(
         "intake",
@@ -106,7 +124,7 @@ def redact(utterance: str, user: UserRecord, *, model: IntakeModel | None = None
 
 
 def _merge(utterance: str, proposal: dict, now: datetime) -> IntakeRequest:
-    care_type = str(proposal.get("care_type") or "").strip().lower().rstrip(".")
+    care_type = backstop.normalise_care_type(str(proposal.get("care_type") or ""))
     if not care_type:
         raise IntakeError(f"{INTAKE_INCOMPLETE}: no care type found")
 
@@ -157,20 +175,45 @@ def _merge(utterance: str, proposal: dict, now: datetime) -> IntakeRequest:
     )
 
 
-def _scrub_leaks(utterance: str, request: IntakeRequest) -> IntakeRequest:
-    """Last line of defence: no identifier value from the utterance may appear in the request."""
-    leaks = backstop.identifier_values(utterance)
-    if not leaks:
-        return request
+def _owner_values(user: UserRecord) -> list[str]:
+    """The owner's own identifiers from the on-device record. None of them may appear in the request."""
+    values = [part for part in re.split(r"\s+", user.name) if len(part) >= 3]
+    values += [user.phone_e164, user.phone_e164.removeprefix("+1"), user.dob or ""]
+    if user.insurance and user.insurance.member_id:
+        values.append(user.insurance.member_id)
+    if user.home:
+        values.append(user.home.address.split(",")[0])
+    return [v for v in values if v]
+
+
+def _validate_outgoing(utterance: str, user: UserRecord, request: IntakeRequest) -> IntakeRequest:
+    """Fail closed: nothing sensitive leaves the device.
+
+    Checked against identifier strings found in the utterance, the owner's own record and the sensitive lexicon.
+    care_type cannot be defaulted, so an unsafe one raises; carrier and search area fall back to their safe values.
+    """
+    leaks = backstop.identifier_values(utterance) + _owner_values(user)
     data = request.model_dump()
+
+    if backstop.unsafe_terms(data["care_type"], leaks) or re.search(r"\d", data["care_type"]):
+        raise IntakeError(f"{INTAKE_INCOMPLETE}: care type carried something that must not leave the device")
+
+    carrier = data.get("insurance_carrier")
+    if isinstance(carrier, str) and (backstop.unsafe_terms(carrier, leaks) or re.search(r"\d", carrier) or len(carrier.split()) > 4):
+        data["insurance_carrier"] = None
+        log.warning("intake: insurance carrier replaced with null after a leak check")
+
+    area = data.get("search_area") or "near home"
+    if backstop.unsafe_terms(area, leaks) or re.search(r"\d", area) or backstop.detect_identifiers(area) or len(area.split()) > 4:
+        data["search_area"] = "near home"
+        for name in ("address", "patient_name"):
+            if name not in data["dropped_fields"] and (name == "address") == bool(backstop.detect_identifiers(area) or re.search(r"\d", area)):
+                data["dropped_fields"].append(name)
+                break
+        log.warning("intake: search area replaced with 'near home' after a leak check")
+
+    data["dropped_fields"].sort(key=DROPPABLE_FIELDS.index)
     serialized = json.dumps(data).lower()
-    if not any(value.lower() in serialized for value in leaks):
-        return request
-    for field in ("insurance_carrier", "search_area"):
-        value = data.get(field)
-        if isinstance(value, str) and any(leak.lower() in value.lower() for leak in leaks):
-            data[field] = None if field == "insurance_carrier" else "near home"
-            log.warning("intake: dropped a leaked identifier from %s", field)
-    if any(leak.lower() in data["care_type"].lower() for leak in leaks):
-        raise IntakeError(f"{INTAKE_INCOMPLETE}: care type carried an identifier")
+    if any(value.lower() in serialized for value in leaks if len(value) >= 3):
+        raise IntakeError(f"{INTAKE_INCOMPLETE}: an identifier survived redaction")
     return IntakeRequest.model_validate(data)

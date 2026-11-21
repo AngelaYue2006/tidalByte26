@@ -14,6 +14,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -120,7 +121,7 @@ class BlankModel:
 
 
 class LeakyModel(PerfectModel):
-    """Copies identifiers into fields it should not."""
+    """Copies identifiers into fields it should not (the pre-review leak case; kept)."""
 
     name = "leaky-stub"
 
@@ -222,25 +223,127 @@ def test_metrics_record_latency_without_text(metrics_file):
         metrics.record("intake", text="never")
 
 
-def test_ollama_client_only_calls_ollama_base_url(monkeypatch):
-    seen: list[str] = []
+class FakeHttpClient:
+    """Stands in for httpx.Client: records how it was built and what was posted."""
 
-    class Response:
-        def raise_for_status(self) -> None:
-            pass
+    built: ClassVar[list[dict]] = []
+    posts: ClassVar[list[str]] = []
 
-        def json(self) -> dict:
-            return {"message": {"content": json.dumps(PerfectModel(ROWS[0]).complete_json("", "", {}))}}
+    def __init__(self, **kwargs) -> None:
+        FakeHttpClient.built.append(kwargs)
 
-    def fake_post(url, json=None, timeout=None):
-        seen.append(url)
+    def post(self, path: str, json: dict | None = None):
+        FakeHttpClient.posts.append(path)
+
+        class Response:
+            def raise_for_status(self) -> None:
+                pass
+
+            def json(self) -> dict:
+                return {"message": {"content": __import__("json").dumps(PerfectModel(ROWS[0]).complete_json("", "", {}))}}
+
         return Response()
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+
+@pytest.fixture
+def fake_http(monkeypatch):
+    FakeHttpClient.built.clear()
+    FakeHttpClient.posts.clear()
+    monkeypatch.setattr(httpx, "Client", FakeHttpClient)
+    return FakeHttpClient
+
+
+def test_ollama_client_only_calls_ollama_base_url_and_ignores_proxies(fake_http):
     client = OllamaClient("http://localhost:11434/", "nano-test-tag")
     request = run(ROWS[0], client)
-    assert seen == ["http://localhost:11434/api/chat"]
     assert request.care_type == ROWS[0]["expected"]["care_type"]
+    assert fake_http.posts == ["/api/chat"]
+    (built,) = fake_http.built
+    assert built["base_url"] == "http://localhost:11434"
+    assert built["trust_env"] is False, "HTTP(S)_PROXY from the environment must never route intake text"
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["http://ollama.example.com:11434", "http://10.0.0.5:11434", "https://api.example.com", "http://localhost.evil.com:11434",
+     "ftp://localhost:11434", "localhost:11434"],
+)
+def test_remote_ollama_url_is_refused_before_any_request(url, fake_http):
+    with pytest.raises(IntakeError, match="OLLAMA_BASE_URL must point at this machine"):
+        OllamaClient(url, "nano-test-tag")
+    assert fake_http.built == [] and fake_http.posts == []
+
+
+@pytest.mark.parametrize("url", ["http://localhost:11434", "http://127.0.0.1:11434", "http://[::1]:11434", "https://ollama.localhost"])
+def test_local_ollama_urls_are_accepted(url, fake_http):
+    OllamaClient(url, "nano-test-tag")
+    assert len(fake_http.built) == 1
+
+
+class AdversarialModel(PerfectModel):
+    """A Nano that lets sensitive content into the structured fields."""
+
+    name = "adversarial-stub"
+
+    def __init__(self, row: dict, **overrides) -> None:
+        super().__init__(row)
+        self.overrides = overrides
+
+    def complete_json(self, system: str, user: str, schema: dict) -> dict:
+        return super().complete_json(system, user, schema) | self.overrides
+
+
+@pytest.mark.parametrize(
+    ("care_type", "cleaned"),
+    [("dental cleaning for a toothache", "dental cleaning"), ("dental cleaning, 3/14/48", "dental cleaning"),
+     ("Dental Cleaning - Mary Johnson", "dental cleaning"), ("dental cleaning because my gums bleed", "dental cleaning")],
+)
+def test_content_after_a_connective_is_cut_from_care_type(care_type, cleaned):
+    row = ROWS[0]
+    request = run(row, AdversarialModel(row, care_type=care_type))
+    assert request.care_type == cleaned
+    assert_no_leak(row, request)
+
+
+@pytest.mark.parametrize(
+    "care_type",
+    ["toothache dentist", "metformin blood test", "lisinopril refill", "mary johnson cleaning", "Mary Johnson", "knee cleaning",
+     "walker dental cleaning", "diabetes checkup"],
+)
+def test_sensitive_care_type_fails_closed(care_type):
+    row = ROWS[0]
+    with pytest.raises(IntakeError, match="INTAKE_INCOMPLETE"):
+        run(row, AdversarialModel(row, care_type=care_type))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "safe"),
+    [
+        ("search_area", "near Mary Johnson", "near home"),
+        ("search_area", "100 Example Street, Chicago", "near home"),
+        ("search_area", "the clinic by my knee doctor", "near home"),
+        ("insurance_carrier", "Delta Dental DEMO-0000-0000-0001", None),
+        ("insurance_carrier", "Medicare for her diabetes", None),
+        ("insurance_carrier", "Mary Johnson", None),
+    ],
+)
+def test_sensitive_carrier_or_area_falls_back_to_safe_value(field, value, safe):
+    # No carrier in this utterance, so the model's insurance_carrier is what gets checked.
+    row = ROWS[0] | {"utterance": "I need a dental cleaning this week, under $150, and I'll need a ride."}
+    row["expected"] = row["expected"] | {"insurance_carrier": None}
+    request = run(row, AdversarialModel(row, **{field: value}))
+    assert getattr(request, field) == safe
+    assert_no_leak(row, request)
+    Draft202012Validator(SCHEMA).validate(request.model_dump())
+
+
+def test_owner_record_values_never_leave_even_when_absent_from_the_utterance():
+    row = ROWS[0]
+    user = owner()
+    out = run(row, AdversarialModel(row, search_area=f"near {user.home.address if user.home else '100 Example Street'}"))
+    assert "address" in out.dropped_fields and out.search_area == "near home"
+    with pytest.raises(IntakeError):
+        run(row, AdversarialModel(row, care_type=f"cleaning {user.name.split()[0]}"))
 
 
 def test_missing_model_tag_raises_instead_of_guessing(monkeypatch):
