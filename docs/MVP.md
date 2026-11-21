@@ -4,7 +4,7 @@
 
 **One request:** Mary needs a dental cleaning this week, under $150, with Delta Dental, and needs a ride. **One comparison:** three clinics called in parallel; Bright Smile Dental wins on fit, price and insurance. **One approval:** Mary taps Approve. **One failure:** the simulated transport check finds no accessible ride. **One escalation:** Sarah, the emergency contact, is texted a scoped request and replies that she can drive. **One completion:** appointment confirmed, calendar event created, ride confirmed, both notified, dashboard shows the whole trail.
 
-**Required connected pieces:** local Nemotron Nano intake (Ollama), Google Calendar free/busy and insert, Google Places and Distance Matrix, three outbound ElevenLabs calls over Twilio with Nemotron Lightning answering, Nemotron Super ranking with reason tags, SQLite task state, SSE live stream, Next.js dashboard with owner and contact views, Twilio SMS both ways, simulated transport adapter.
+**Required connected pieces:** local Nemotron Nano intake (Ollama), Google Calendar free/busy and insert, Google Places and Routes API, three outbound ElevenLabs calls over Twilio with Nemotron Lightning answering, Nemotron Super ranking with reason tags, SQLite task state, SSE live stream, Next.js dashboard with owner and contact views, Twilio SMS both ways, simulated transport adapter.
 
 **Fallbacks (same events, labelled on screen):** `VOICE_MODE=mock` scripted receptionists; `PLACES_MODE=fixture` three hard-coded clinics; `CALENDAR_MODE=mock`; `SMS_MODE=mock` writes to the dashboard instead of sending; `LIVE_STREAM_MODE=poll`.
 
@@ -47,7 +47,7 @@ Real clinic calls; real transport booking; insurance eligibility checks; medical
 | Owner | Directory | Deliverables | First checkpoint |
 |---|---|---|---|
 | **Person 1 — Backend and AI** | `backend/` | FastAPI app, orchestrator pipeline, Nano intake via Ollama, Lightning custom-LLM proxy, Super ranker, hard rules, SQLite state, event bus and SSE, approvals, demo reset, Nemotron metrics | `POST /api/requests` with all adapters in mock mode drives the full event sequence to `GET /api/live` |
-| **Person 2 — Voice and integrations** | `integrations/` | ElevenLabs agent setup and outbound call API, Twilio SMS send and webhook, Google Calendar, Places, Distance Matrix adapters, transport and receptionist simulators, typed outputs | One real call to a teammate's phone with Nemotron answering, transcript posted back to the backend |
+| **Person 2 — Voice and integrations** | `integrations/` | ElevenLabs agent setup and outbound call API, Twilio SMS send and webhook, Google Calendar, Places, Routes API adapters, transport and receptionist simulators, typed outputs | One real call to a teammate's phone with Nemotron answering, transcript posted back to the backend |
 | **Person 3 — Frontend and pitch** | `frontend/` | Next.js dashboard: request bar with mic, three call cards, decision card, approval button, transport and contact cards, confirmations, owner and contact views, history page, SSE client; demo script and Devpost write-up | Dashboard renders the full event sequence from the mock backend |
 
 `shared/` schemas and `docs/ARCHITECTURE.md` change only by PR reviewed by the affected owners. Person 1 coordinates integration. All three own the pitch.
@@ -58,7 +58,7 @@ Real clinic calls; real transport booking; insurance eligibility checks; medical
 
 **Gate 1 — Vertical slice (10–30 %):** text request → Nano → fixture clinics → mock receptionists → hard rules + Super → approval → mock booking → mock transport → mock SMS → events over SSE → dashboard. Everything mocked except the two Nemotron cloud calls and Nano.
 
-**Gate 2 — Real services (30–65 %):** Person 2 lands one real ElevenLabs call, then three concurrent. Real Calendar, Places and Distance Matrix. Real Twilio SMS both ways through the tunnel. Person 3 adds the contact view, history and polish. Person 1 adds persistence, idempotency and metrics.
+**Gate 2 — Real services (30–65 %):** Person 2 lands one real ElevenLabs call, then three concurrent. Real Calendar, Places and Routes API. Real Twilio SMS both ways through the tunnel. Person 3 adds the contact view, history and polish. Person 1 adds persistence, idempotency and metrics.
 
 **Gate 3 — Full integration (65–80 %):** full run with teammates as receptionists, three times. Fix timing. Capture metrics. Record the backup video.
 
@@ -86,7 +86,7 @@ Real clinic calls; real transport booking; insurance eligibility checks; medical
 ## Cut list, in order
 
 1. Never cut: Nano intake, three calls (mock allowed), hard rules + Super ranking, one approval, contact SMS, SSE dashboard.
-2. Cut Distance Matrix; use straight-line distance from Places coordinates.
+2. Cut Routes API; use straight-line distance from Places coordinates.
 3. Cut real Places; use the fixture.
 4. Cut Google OAuth; use one pre-authorized demo calendar or mock.
 5. Cut live ElevenLabs calls; use the receptionist simulator and the replay prototype with synthesized voices.

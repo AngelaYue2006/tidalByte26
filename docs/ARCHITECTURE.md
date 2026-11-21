@@ -11,7 +11,7 @@ flowchart TD
     B -- SSE: live events --> D
     B --> N1[Nemotron Nano, local via Ollama]
     B --> N2[NVIDIA API: Lightning, Super]
-    B --> G[Google Calendar, Places, Distance Matrix]
+    B --> G[Google Calendar, Places, Routes API]
     B --> E[ElevenLabs Agents]
     E <--> T[Twilio Voice] <--> C[3 clinic phones, teammates]
     E -- custom LLM --> B
@@ -182,7 +182,7 @@ TWILIO_PHONE_NUMBER=
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REFRESH_TOKEN=       # one test account
-GOOGLE_MAPS_API_KEY=        # Places + Distance Matrix
+GOOGLE_MAPS_API_KEY=        # Places + Routes API
 DEMO_PHONE_ALLOWLIST=       # comma-separated teammate numbers, E.164
 VOICE_MODE=mock             # mock | live
 PLACES_MODE=fixture         # fixture | live
@@ -202,6 +202,6 @@ LIVE_STREAM_MODE=sse        # sse | poll
 2. Nano intake on the 20-utterance set → accuracy and latency logged.
 3. One real outbound call to a teammate, Lightning answering through the proxy → transcript and `call_result`.
 4. Three concurrent calls.
-5. Real Calendar insert once; real Places and Distance Matrix.
+5. Real Calendar insert once; real Places and Routes API.
 6. SMS round trip through the tunnel: approval YES and contact reply.
 7. Two full runs with reset between them.
