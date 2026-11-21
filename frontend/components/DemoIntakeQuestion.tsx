@@ -8,9 +8,11 @@ type Props = {
   draft: IntakeDraft;
   change: (draft: IntakeDraft | null) => void;
   finish: (preferences: DentalPreferences) => void;
+  /** When true, eyebrow says dental demo; live guided intake leaves it off. */
+  demo?: boolean;
 };
 
-export default function DemoIntakeQuestion({ draft, change, finish }: Props) {
+export default function DemoIntakeQuestion({ draft, change, finish, demo = true }: Props) {
   const fields = missingFields(draft.known);
   const field = fields[draft.index];
   const budget = field === "budget";
@@ -22,7 +24,7 @@ export default function DemoIntakeQuestion({ draft, change, finish }: Props) {
     ? [["amount", "Set a maximum"], ["none", "No maximum"]]
     : [["true", "Yes, I’ll need a ride"], ["false", "No, I have a ride"]];
   const selected = budget && choice !== "" && choice !== "none" ? "amount" : choice;
-  return <main className="simple-main"><SimplePanel stage="request" demo
+  return <main className="simple-main"><SimplePanel stage="request" demo={demo}
     title={budget ? "How much would you like to spend?" : "Will you need a ride?"}>
     <p className="intake-progress">Before we call · Question {draft.index + 1} of {fields.length}</p>
     <p>{budget ? "We’ll look for a dental cleaning within your budget." : "This helps LifeLine plan transportation if you approve an appointment."}</p>

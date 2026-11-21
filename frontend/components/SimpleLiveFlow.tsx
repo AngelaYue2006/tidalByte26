@@ -101,6 +101,7 @@ export default function SimpleLiveFlow({ state, viewer, taskId, demo, error }: {
         draft={draft}
         change={changeDraft}
         finish={(preferences) => void startSearch(pendingText, preferences)}
+        demo={demo}
       />
     );
   }
