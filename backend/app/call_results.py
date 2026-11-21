@@ -71,8 +71,9 @@ def parse_insured(text: str | None) -> bool | None:
 
 
 def parse_slot(text: str | None, *, call_date: datetime, tz: ZoneInfo) -> tuple[datetime, datetime] | None:
-    """'Thu 9:30', 'Friday at 4 pm', 'next Monday 10:00' -> the first such weekday after the call day, in the owner's tz.
-    Without am/pm, 1-6 is afternoon and 7-12 is morning (12 is noon), which is how receptionists say clinic hours."""
+    """'Thu 9:30', 'Friday at 4 pm', 'next Monday 10:00' -> the first such weekday on or after the call day, in the owner's tz;
+    a same-day time only when it is still ahead. Without am/pm, 1-6 is afternoon and 7-12 is morning (12 is noon),
+    which is how receptionists say clinic hours."""
     if not text:
         return None
     low = text.lower()
@@ -89,10 +90,17 @@ def parse_slot(text: str | None, *, call_date: datetime, tz: ZoneInfo) -> tuple[
         hour = 0
     elif not ampm and 1 <= hour <= 6:
         hour += 12
-    today = call_date.astimezone(tz).date()
-    ahead = (day - today.weekday()) % 7 or 7  # strictly after the call day
-    if "next" in low and ahead < 7:
-        ahead += 7
+    now_local = call_date.astimezone(tz)
+    today = now_local.date()
+    ahead = (day - today.weekday()) % 7
+    if "next" in low:
+        ahead = ahead + 7 if ahead < 7 else ahead
+    elif ahead == 0:
+        # Same weekday as the call: keep it only when the time is still ahead today. A time already past is
+        # ambiguous (today, or in a week?) and counts as missing, so Super reads the transcript instead.
+        candidate = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if candidate <= now_local:
+            return None
     start = datetime.combine(today + timedelta(days=ahead), datetime.min.time(), tzinfo=tz).replace(hour=hour, minute=minute)
     return start, start + timedelta(minutes=SLOT_MINUTES)
 
@@ -122,10 +130,10 @@ class CallFacts:
 def facts_from_collection(results: dict, *, call_date: datetime, tz: ZoneInfo) -> CallFacts:
     price = parse_price(collected_value(results.get("price")))
     insured = parse_insured(collected_value(results.get("insured")))
-    slot_text = collected_value(results.get("slot"))
-    slot = parse_slot(slot_text, call_date=call_date, tz=tz)
+    slot = parse_slot(collected_value(results.get("slot")), call_date=call_date, tz=tz)
     start, end = slot if slot else (None, None)
-    return CallFacts(price, insured, start, end, slot_label(start) if start else slot_text, "data_collection")
+    # The label is derived from the validated slot only; raw collected text never reaches a card or a contact.
+    return CallFacts(price, insured, start, end, slot_label(start) if start else None, "data_collection")
 
 
 def merge(facts: CallFacts, summary: CallSummary) -> CallFacts:
@@ -137,7 +145,7 @@ def merge(facts: CallFacts, summary: CallSummary) -> CallFacts:
         facts.insured if facts.insured is not None else summary.insured,
         start,
         end,
-        slot_label(start) if start else (facts.slot_label or summary.slot_label),
+        slot_label(start) if start else None,  # Super's free-text label is never shown; only a validated slot is
         "super" if not any((facts.price_usd is not None, facts.insured is not None, facts.slot_start is not None)) else "mixed",
     )
 

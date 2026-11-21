@@ -22,7 +22,10 @@ def call_projection(call: Call, meta: str | None = None) -> dict:
     """calls.result_json also carries the structured facts for ranking (price_usd, slot_start, slot_end, source);
     the card gets the four display fields the schema allows."""
     stored = _load(call.result_json)
-    result = {k: stored[k] for k in CALL_RESULT_KEYS if k in stored} if isinstance(stored, dict) else None
+    # Only a complete, structured result reaches a card. An incomplete or failed call shows no result at all,
+    # so no unvalidated text can leak through the projection (invariant 4, product rule 4).
+    complete = isinstance(stored, dict) and stored.get("source") not in (None, "incomplete") and "error" not in stored
+    result = {k: stored[k] for k in CALL_RESULT_KEYS if k in stored} if complete else None
     return {
         "call_id": call.id,
         "clinic": call.clinic_name,

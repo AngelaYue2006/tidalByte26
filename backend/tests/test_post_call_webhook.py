@@ -427,7 +427,7 @@ def test_parse_insured(text, expected):
         ("Friday 4 pm", "2026-11-27T16:00:00-06:00"),
         ("Mon 10:00", "2026-11-23T10:00:00-06:00"),
         ("next Monday at 10", "2026-11-30T10:00:00-06:00"),
-        ("Sat 12:00", "2026-11-28T12:00:00-06:00"),
+        ("Sun 12:00", "2026-11-22T12:00:00-06:00"),  # Sat 12:00 on a Saturday-afternoon call is ambiguous, see the same-day test
         ("Tue 8 am", "2026-11-24T08:00:00-06:00"),
     ],
 )
@@ -441,6 +441,52 @@ def test_parse_slot_resolves_weekday_and_clinic_hours(text, start):
 @pytest.mark.parametrize("text", ["sometime next week", "9:30", "Thursday", "", None])
 def test_parse_slot_refuses_what_it_cannot_resolve(text):
     assert parse_slot(text, call_date=CALL_DATE, tz=CHI) is None
+
+
+def test_same_day_slot_is_kept_when_still_ahead_and_missing_when_past():
+    thursday_8am = datetime(2026, 11, 26, 8, 0, tzinfo=CHI)
+    slot = parse_slot("Thu 9:30", call_date=thursday_8am, tz=CHI)
+    assert slot is not None and slot[0].isoformat() == "2026-11-26T09:30:00-06:00"
+    assert slot_ok(*slot, [Window(datetime(2026, 11, 26, 8, tzinfo=CHI), datetime(2026, 11, 26, 12, tzinfo=CHI))])
+    thursday_10am = datetime(2026, 11, 26, 10, 0, tzinfo=CHI)
+    assert parse_slot("Thu 9:30", call_date=thursday_10am, tz=CHI) is None  # ambiguous: today has passed
+    assert parse_slot("next Thu 9:30", call_date=thursday_8am, tz=CHI)[0].isoformat() == "2026-12-03T09:30:00-06:00"
+    assert parse_slot("Fri 4:00", call_date=thursday_10am, tz=CHI)[0].isoformat() == "2026-11-27T16:00:00-06:00"
+
+
+def test_same_day_webhook_on_a_thursday_call_reports_slotok_true(client, app):
+    thursday_8am = datetime(2026, 11, 26, 8, 0, tzinfo=CHI)
+    body = payload({"price": "$95", "slot": "Thu 9:30", "insured": "yes"})
+    body["event_timestamp"] = int(thursday_8am.timestamp())
+    post(client, body)
+    (result,) = events(app, "call_result")
+    assert result[2]["slot"] == "Thu 9:30" and result[2]["slotOk"] is True
+    assert call(app)[1]["slot_start"] == "2026-11-26T09:30:00-06:00"
+
+
+def test_unparseable_slot_text_with_an_identifier_never_reaches_a_card_or_the_contact(client, app):
+    from app.events import Viewer
+    from app.projections import snapshot
+
+    app.state.super_client = FakeSuper("prose", "prose")  # Super fails too, so the result stays incomplete
+    post(client, payload({"price": "$95", "slot": "ask for Mary Johnson, member DEMO-0000-0000-0001", "insured": "yes"}))
+    stored = call(app)[1]
+    assert stored["source"] == "incomplete" and stored["slot"] == "" and stored["slot_start"] is None
+    assert "Mary" not in json.dumps(stored) and "DEMO" not in json.dumps(stored)
+    assert events(app, "call_result") == []
+    snap = snapshot(app.state.engine, Viewer(id="sarah", role="contact", owner_id="mary"))
+    card = next(c for c in snap["calls"] if c["call_id"] == "call-a")
+    assert card["result"] is None and card["status"] == "done"
+    assert "DEMO" not in json.dumps(snap) and "Mary" not in json.dumps(snap)
+
+
+def test_super_free_text_label_is_not_used_when_its_slot_is_missing(client, app):
+    app.state.super_client = FakeSuper(json.dumps({"price_usd": 95, "insured": True, "slot_start": None, "slot_end": None,
+                                                   "slot_label": "whenever Mary Johnson can come"}))
+    post(client, payload({"price": "$95", "insured": "yes"}))
+    stored = call(app)[1]
+    assert stored["slot"] == "" and "Mary" not in json.dumps(stored)
+    assert events(app, "call_result") == []
 
 
 def test_slot_ok_is_whole_slot_inside_one_window():
