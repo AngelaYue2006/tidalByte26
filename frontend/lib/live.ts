@@ -8,6 +8,7 @@ import {
   type DashboardState,
 } from "@/lib/dashboard";
 import { isLiveEvent, type LiveEvent } from "@/lib/events";
+import { bootstrapSession } from "@/lib/session";
 
 export function liveUrl(viewerId: string): string {
   return `/api/live?viewer_id=${encodeURIComponent(viewerId)}`;
@@ -67,15 +68,6 @@ function createGate(handlers: LiveHandlers): StreamGate {
     },
   };
   return gate;
-}
-
-/** Fetch the dashboard session cookie once; the read routes require it. */
-export async function bootstrapSession(): Promise<void> {
-  try {
-    await fetch("/api/session", { credentials: "same-origin" });
-  } catch {
-    // The stream or poll will surface the failure.
-  }
 }
 
 /**
@@ -154,32 +146,24 @@ function connectPoll(
 ): () => void {
   const gate = createGate(handlers);
   let stopped = false;
-  let rebootstrapped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const tick = async () => {
     if (stopped) return;
-    timer = undefined;
     try {
+      // getEvents goes through apiFetch: a 401 fetches the session once and retries (lib/session.ts).
       const payload = await getEvents(taskId, viewerId);
       for (const item of normalizeEventList(payload)) {
         gate.apply(item.event, item.id);
       }
     } catch (err) {
-      const text = err instanceof Error ? err.message : String(err);
-      if (!rebootstrapped && (text.includes("401") || text.includes("session required"))) {
-        rebootstrapped = true;
-        await bootstrapSession();
-        if (!stopped) timer = setTimeout(() => void tick(), 0);
-        return;
-      }
       handlers.onError?.(err);
     } finally {
-      if (!stopped && !timer) timer = setTimeout(() => void tick(), pollMs);
+      if (!stopped) timer = setTimeout(() => void tick(), pollMs);
     }
   };
 
-  void bootstrapSession().then(tick);
+  void tick();
 
   return () => {
     stopped = true;
@@ -227,4 +211,5 @@ export function connectLive(viewerId: string, options: ConnectLiveOptions = {}):
   return connectSse(viewerId, handlers);
 }
 
+export { bootstrapSession };
 export type { DashboardState };
