@@ -214,7 +214,7 @@ SENSITIVE_WORDS: frozenset[str] = frozenset(
     }
 )
 _DRUG_SUFFIX = re.compile(r"\b\w{3,}(?:mycin|cillin|pril|statin|formin|olol|prazole|sartan|azepam|oxetine|dipine|tidine|vir|mab)\b", re.IGNORECASE)
-_CARE_TYPE_CUT = re.compile(r"\s+(?:for|because|due to|since|with|as|after|about|regarding)\s+|[,;:(\-]", re.IGNORECASE)
+_CARE_TYPE_CUT = re.compile(r"\s+(?:for|because|due to|since|with|as|after|about|regarding)\s+|[,;:(]|\s[-\u2013\u2014]\s", re.IGNORECASE)
 
 
 def normalise_care_type(text: str) -> str:

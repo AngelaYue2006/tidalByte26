@@ -1,6 +1,6 @@
 """T2: run the 20 fixture utterances through local_intake.redact; assert dropped fields and kept fields.
 
-Two stand-in models drive the pipeline without Ollama: PerfectModel answers with the fixture's expected values and
+All 20 fixture utterances plus two inline cases run. Two stand-in models drive the pipeline without Ollama: PerfectModel answers with the fixture's expected values and
 BlankModel answers with nothing useful, which exercises the regex backstop. Every output must validate against
 shared/intake_request.schema.json and must not contain any value that was supposed to be dropped. Set
 LIFELINE_LIVE_INTAKE=1 with OLLAMA_BASE_URL and NEMOTRON_NANO_TAG to run the same set through the real model.
@@ -63,12 +63,12 @@ INLINE_CASES = [
 
 
 def fixture_rows() -> list[dict]:
-    if not FIXTURE.exists():
-        return []
-    return [json.loads(line) for line in FIXTURE.read_text().splitlines() if line.strip()]
+    rows = [json.loads(line) for line in FIXTURE.read_text().splitlines() if line.strip()]
+    assert len(rows) == 20, f"intake_utterances.jsonl must hold the 20 utterances from #4, found {len(rows)}"
+    return rows
 
 
-ROWS = fixture_rows() or INLINE_CASES
+ROWS = fixture_rows() + INLINE_CASES
 IDS = [r["id"] for r in ROWS]
 
 
@@ -153,8 +153,8 @@ def assert_no_leak(row: dict, request: IntakeRequest) -> None:
     assert row["utterance"].lower() not in out
 
 
-def test_fixture_present_or_inline_fallback():
-    assert len(ROWS) in (2, 20), "20 fixture rows from #4, or the 2 inline cases until it merges"
+def test_all_twenty_fixture_rows_plus_inline_cases_run():
+    assert len(ROWS) == 20 + len(INLINE_CASES)
 
 
 @pytest.mark.parametrize("row", ROWS, ids=IDS)
@@ -296,7 +296,8 @@ class AdversarialModel(PerfectModel):
 @pytest.mark.parametrize(
     ("care_type", "cleaned"),
     [("dental cleaning for a toothache", "dental cleaning"), ("dental cleaning, 3/14/48", "dental cleaning"),
-     ("Dental Cleaning - Mary Johnson", "dental cleaning"), ("dental cleaning because my gums bleed", "dental cleaning")],
+     ("Dental Cleaning - Mary Johnson", "dental cleaning"), ("dental cleaning because my gums bleed", "dental cleaning"),
+     ("Cardiology follow-up with Dr. Smith", "cardiology follow-up")],
 )
 def test_content_after_a_connective_is_cut_from_care_type(care_type, cleaned):
     row = ROWS[0]
