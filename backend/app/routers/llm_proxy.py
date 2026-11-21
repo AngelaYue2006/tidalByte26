@@ -5,8 +5,10 @@ in the request body (what the voice adapter passed as `custom_llm_extra_body` wh
 not in dynamic variables. The `Authorization: Bearer` header is accepted for the same secret as a fallback.
 
 Turns are keyed by their position in the conversation ElevenLabs sends, so a retried request maps onto the same
-rows and a genuine repeated line later in the call is kept. Every turn has one `transcript` event with `contact`
-visibility (docs/ARCHITECTURE.md: transcripts are visible to both roles); a retry repairs a missing event.
+rows and a genuine repeated line later in the call is kept. A turn and its `transcript` event are written in one
+transaction behind a unique (call_id, seq), so overlapping retries write exactly one of each. Transcript events
+have `contact` visibility (docs/ARCHITECTURE.md: visible to both roles; the open item in docs/DECISIONS.md covers
+screening clinic lines).
 First-token latency is one `call_agent` row in metrics.jsonl per proxy turn.
 """
 
@@ -22,12 +24,12 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import Engine
-from sqlmodel import select
+from sqlalchemy.exc import IntegrityError
 
 from app import metrics
 from app.config import MissingSetting, Settings
 from app.db import session_scope
-from app.events import EventBus, emit
+from app.events import EventBus
 from app.models import Call, Event, Task, Turn
 from app.nemotron.call_agent import (
     ChatStream,
@@ -105,27 +107,40 @@ def conversation_turns(messages: list[dict]) -> tuple[list[dict], int | None, in
 
 
 def record_turn(engine: Engine, bus: EventBus, spec: CallSpec, seq: int, speaker: str, text: str) -> Turn | None:
-    """Make sure turn `seq` of this call and its transcript event both exist. A retry that finds the turn keeps the
-    stored line (even if Lightning now words it differently) and only repairs a missing event (invariant 7)."""
+    """Write turn `seq` of this call and its transcript event in ONE transaction, or nothing.
+
+    `turns (call_id, seq)` is unique, so of two overlapping retries exactly one INSERT succeeds and carries the event
+    row with it; the other hits the constraint, rolls back and writes nothing (invariant 7). The bus is told after
+    commit. A retry whose Lightning wording differs keeps the stored line."""
     if not text:
         return None
-    call_id = spec.call_id
-    with session_scope(engine) as session:
-        turn = session.exec(select(Turn).where(Turn.call_id == call_id, Turn.seq == seq)).first()
-        if turn is None:
-            turn = Turn(call_id=call_id, seq=seq, speaker=speaker, text=text)
+    turn = Turn(call_id=spec.call_id, seq=seq, speaker=speaker, text=text)
+    event = Event(
+        task_id=spec.task_id,
+        type="transcript",
+        payload_json=json.dumps({"call_id": spec.call_id, "seq": seq, "speaker": speaker, "text": text}, ensure_ascii=False),
+        visibility="contact",  # docs/ARCHITECTURE.md: transcripts are visible to both roles; see the D6 open item
+    )
+    try:
+        with session_scope(engine) as session:
             session.add(turn)
+            session.add(event)
             session.flush()
-        session.refresh(turn)
-        session.expunge(turn)
-        has_event = any(
-            json.loads(e.payload_json).get("call_id") == call_id and json.loads(e.payload_json).get("seq") == seq
-            for e in session.exec(select(Event).where(Event.task_id == spec.task_id, Event.type == "transcript")).all()
-        )
-    if not has_event:
-        emit(engine, bus, spec.task_id, "transcript",
-             {"call_id": call_id, "seq": seq, "speaker": turn.speaker, "text": turn.text}, visibility="contact")
+            session.refresh(turn)
+            session.refresh(event)
+            session.expunge(turn)
+            session.expunge(event)
+    except IntegrityError:
+        log.info("turn %s of call %s already recorded; retry ignored", seq, spec.call_id)
+        return None
+    bus.publish(event, _owner_id(engine, spec.task_id))
     return turn
+
+
+def _owner_id(engine: Engine, task_id: str) -> str:
+    with session_scope(engine) as session:
+        task = session.get(Task, task_id)
+        return task.owner_id if task else ""
 
 
 def record_first_token(request: Request, call_id: str, seconds: float) -> None:

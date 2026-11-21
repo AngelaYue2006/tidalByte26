@@ -249,17 +249,52 @@ def test_a_genuine_repeated_line_later_in_the_call_is_kept(client, app):
     assert [p["seq"] for p in payloads] == [2, 3, 4, 5, 6, 7]
 
 
-def test_retry_repairs_a_turn_whose_event_was_never_written(client, app):
-    client.post("/v1/chat/completions", json=body())
+def test_overlapping_retries_write_exactly_one_turn_and_one_event(tmp_path):
+    import threading
+
+    from app.nemotron.types import CallSpec
+    from app.routers.llm_proxy import record_turn
+
+    app = create_app(load_settings(env_file=None, environ={**ENV, "DATABASE_URL": f"sqlite:///{tmp_path}/race.db"}))
+    with TestClient(app):
+        with session_scope(app.state.engine) as s:
+            s.add(Task(id="task-1", owner_id="mary", status="calling", intake_json="{}", windows_json="[]"))
+            s.add(Call(id="call-a", task_id="task-1", clinic_name="Bright Smile Dental", clinic_phone="+15555550111"))
+        spec = CallSpec(call_id="call-a", task_id="task-1", clinic_name="Bright Smile Dental", care_type="dental cleaning")
+        barrier = threading.Barrier(8)
+        written = []
+
+        def complete(i):
+            barrier.wait()
+            written.append(record_turn(app.state.engine, app.state.bus, spec, 3, "agent", f"wording {i}") is not None)
+
+        threads = [threading.Thread(target=complete, args=(i,)) for i in range(8)]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        assert written.count(True) == 1
+        assert len(turns(app)) == 1
+        with session_scope(app.state.engine) as s:
+            rows = s.exec(select(Event).where(Event.type == "transcript")).all()
+            assert len(rows) == 1 and json.loads(rows[0].payload_json)["seq"] == 3
+
+
+def test_turn_and_event_are_written_together_or_not_at_all(client, app, monkeypatch):
+    from app.routers import llm_proxy
+
+    class Boom(Exception):
+        pass
+
+    def exploding_event(**kwargs):
+        raise Boom("event row write failed")
+
+    monkeypatch.setattr(llm_proxy, "Event", exploding_event)
+    with pytest.raises(Boom):
+        client.post("/v1/chat/completions", json=body())
+    assert turns(app) == []
     with session_scope(app.state.engine) as s:
-        for e in s.exec(select(Event).where(Event.type == "transcript")).all():
-            s.delete(e)  # simulate the turn committing and the emit failing
-    client.post("/v1/chat/completions", json=body())
-    assert len(turns(app)) == 2
-    with session_scope(app.state.engine) as s:
-        rows = s.exec(select(Event).where(Event.type == "transcript").order_by(Event.id)).all()
-        seen = [(json.loads(r.payload_json)["seq"], json.loads(r.payload_json)["speaker"]) for r in rows]
-    assert seen == [(2, "clinic"), (3, "agent")]
+        assert s.exec(select(Event)).all() == []
 
 
 def test_first_turn_without_a_clinic_line_writes_only_the_agent(client, app):

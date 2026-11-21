@@ -50,3 +50,7 @@
 
 - `call_result.price` and `call_result.slot` are display strings (`"$95"`, `"Thu 9:30"`), as the prototype renders them. The numeric price and ISO slot live in `Offer` and the task `booking`; the dashboard never computes from the event. Default taken in `shared/events.schema.json`.
 - `IntakeRequest.time_range` is `{start, end}` as ISO date-times in the owner's timezone, resolved on device from phrases like "this week". Default taken in `shared/intake_request.schema.json`.
+
+## Open item from the call proxy (#20)
+
+- **Should clinic speech be screened before the contact sees it?** `transcript` events are visible to both roles (Live events visibility rule, D6: the contact sees the call cards). The agent speaks only redacted facts, but a receptionist could say something out of scope (a price is fine; a name or an ID would not be). Default taken in PR #58: no screening and no visibility change, because the clinic is a business speaking about its own prices and openings, not the patient, and because owner-only transcripts would reopen D6. If an owner wants screening, it is a projection step in `app/events.py` (`project_event`) for `transcript` payloads when `role == "contact"`, in its own PR that edits this entry.
