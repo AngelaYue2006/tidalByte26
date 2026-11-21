@@ -116,6 +116,7 @@ def redact(utterance: str, user: UserRecord, *, model: IntakeModel | None = None
         model_ms=model_ms,
         latency_ms=total_ms,
         utterance_chars=len(utterance),
+        cloud_bytes=len(request.model_dump_json().encode("utf-8")),  # all that leaves the device
         kept=[k for k, v in request.model_dump().items() if k != "dropped_fields" and v not in (None, "", [])],
         dropped=request.dropped_fields,
     )
