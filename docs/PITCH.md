@@ -1,10 +1,6 @@
 # LifeLine — Pitch
 
-Demo script, Devpost copy, and the Nemotron track explanation. Refresh numbers with:
-
-```bash
-python scripts/metrics_summary.py
-```
+Demo script, Devpost copy, and the Nemotron track explanation. Measured numbers (redaction accuracy, latencies, time-to-booked) are filled by backend issue **#25** (`app/metrics.py` → `metrics.jsonl` → `scripts/metrics_summary.py`) when that lands. Until then the metrics table below stays pending — do not invent a LifeLine wall-clock from the prototype replay.
 
 ## What is simulated (say this plainly)
 
@@ -29,9 +25,9 @@ From `docs/MVP.md`. Total ≈ 175 s; leave a few seconds of slack.
 4. **Decision (20 s):** “Why Nemotron picked Bright Smile Dental” — reason tags plus the trade-off sentence (Smile Co. closer, wrong free window).
 5. **Approve (10 s):** Mary’s phone buzzes with the pick; tap **Approve**. Booking confirmed; calendar event appears.
 6. **Ride (30 s):** Transport check shows **No accessible ride found (simulated)**. Sarah’s phone buzzes. She replies “I can drive her.” Dashboard shows the ride confirmed.
-7. **Close (20 s):** Final texts land; history shows the run. **End on the number:** time to a booked appointment with LifeLine versus calling three clinics yourself (see metrics below).
+7. **Close (20 s):** Final texts land; history shows the run. **End on the number:** time to a booked appointment with LifeLine versus calling three clinics yourself — paste the live comparison from #25’s summary once measured. Until then, close on the privacy beat (raw text never leaves the device) and the one-approval story.
 
-**Backup:** `frontend/prototype/index.html` replays the same events with synthesized clinic voices; keep a screen recording of a full live run.
+**Backup:** `frontend/prototype/index.html` replays the same events with synthesized clinic voices; keep a screen recording of a full live run. The prototype’s scripted `at:` timestamps are demo pacing, not a system measurement.
 
 ---
 
@@ -57,9 +53,9 @@ A **cloud** redactor has already received the sensitive text by the time it reda
 
 Demo beat: Wi-Fi off → speak → chips with **Processed on device** → Wi-Fi on → calls start.
 
-### Measured numbers
+### Measured numbers (pending #25)
 
-Output of `python scripts/metrics_summary.py` (2026-11-21). Redaction and model latencies refresh when backend issue **#25** writes `backend/metrics.jsonl`; until then those rows are `—`.
+Filled by `python scripts/metrics_summary.py` after backend **#25** lands. Paste the script output here and into Devpost. Rows stay pending until then — including time-to-booked for LifeLine. A desk stopwatch of three sequential mock clinic dialogues (no LifeLine) was **201.5 s** on 2026-11-21; that is a manual baseline only. The LifeLine side is **not yet measured** (do not use the prototype’s 15.5 s `booked.at` script constant as a result).
 
 | Metric | Value |
 |---|---|
@@ -70,15 +66,8 @@ Output of `python scripts/metrics_summary.py` (2026-11-21). Redaction and model 
 | Call-agent first token p50 (ms) | — |
 | Ranking latency p50 (ms) | — |
 | Bytes sent to cloud per request | — |
-| Time to booked — LifeLine (s) | **15.5** |
-| Time to booked — manual (s) | **201.5** |
-
-**Time-to-booked comparison:** LifeLine **15.5 s** vs manual **201.5 s** (**13.0×** faster on this measurement).
-
-- LifeLine: prototype SCENARIO timestamps, request → `booked` at 15 500 ms (compressed demo, mock receptionists).
-- Manual: stopwatch desk rehearsal — three sequential mock clinic dialogues with timed hold/IVR, speak scripts, compare and write a booking note, without LifeLine.
-
-When live Nano / Lightning / Super metrics exist, re-run the script and paste the table here and into Devpost.
+| Time to booked — LifeLine (s) | — |
+| Time to booked — manual (s) | 201.5 (desk rehearsal; LifeLine not yet measured) |
 
 ---
 
@@ -114,7 +103,7 @@ Smaller local models earn their place when the job is redaction. Ranking and liv
 
 ### What's next
 
-Live metrics from `scripts/metrics_summary.py` once intake and call-agent timers land; real Places/Calendar/SMS where still mocked; never real clinic robocalls without consent and legal review.
+Live metrics and the time-to-booked comparison from #25’s summary once a real LifeLine run is timed; real Places/Calendar/SMS where still mocked; never real clinic robocalls without consent and legal review.
 
 ### Built with
 
@@ -126,4 +115,4 @@ See `README.md`. Demo phones only on `DEMO_PHONE_ALLOWLIST`. Transport and clini
 
 ### The number we close on
 
-**15.5 s** to a booked appointment on the LifeLine prototype path versus **201.5 s** doing the same three clinic conversations by hand in our stopwatch rehearsal — **13×** faster before you count real-world hold music. Refresh with `python scripts/metrics_summary.py`.
+Close on **privacy + one approval** until #25 ships a measured LifeLine time-to-booked. Manual desk baseline only: **201.5 s** for three sequential mock clinic dialogues without LifeLine. Do not claim a LifeLine seconds figure from the prototype replay.
