@@ -116,6 +116,9 @@ export type RideConfirmedEvent = {
 export type TaskUpdatedEvent = {
   type: "task_updated";
   status: string;
+  /** Present on failed runs (NO_ELIGIBLE_OFFER, RANKING_FAILED, …). */
+  reason?: string;
+  message?: string;
 } & EventMeta;
 
 export type SnapshotEvent = {

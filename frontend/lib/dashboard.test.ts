@@ -106,6 +106,24 @@ describe("reduceDashboard with prototype SCENARIO", () => {
     expect(state.approval?.pick.clinic).toBe("Bright Smile Dental");
   });
 
+  it("keeps failure reason and message from task_updated", () => {
+    const state = foldEvents([
+      {
+        type: "task_updated",
+        status: "failed",
+        reason: "RANKING_FAILED",
+        message: "Ranking did not produce a decision.",
+        task_id: "t-fail",
+      },
+    ]);
+    expect(state.taskStatus).toBe("failed");
+    expect(state.failure).toEqual({
+      reason: "RANKING_FAILED",
+      message: "Ranking did not produce a decision.",
+    });
+    expect(state.taskId).toBe("t-fail");
+  });
+
   it("tolerates a decision event missing second", () => {
     const state = foldEvents([
       {

@@ -99,7 +99,9 @@ export default function LivePlaceholder() {
         !!liveState.transport ||
         !!liveState.decision ||
         !!liveState.approval ||
-        !!liveState.confirmations);
+        !!liveState.confirmations ||
+        !!liveState.failure ||
+        liveState.taskStatus === "failed");
     if (hasLive) return liveState!;
     if (previewAwaiting) return AWAITING_STATE;
     if (preview) return PREVIEW_STATE;
@@ -134,6 +136,18 @@ export default function LivePlaceholder() {
   return (
     <main>
       <RequestBar viewer={viewer} chips={chips} requestText={requestText} />
+
+      {state.taskStatus === "failed" ? (
+        <div className="card status-card" role="alert">
+          <p className="bad status-card-text">
+            {state.failure?.message ??
+              "Nothing was booked — none of the clinic offers fit the request."}
+          </p>
+          {state.failure?.reason ? (
+            <p className="faint status-card-text">{state.failure.reason}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {calls.length > 0 ? (
         <section className="calls" aria-label="Clinic calls">
