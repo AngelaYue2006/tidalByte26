@@ -101,10 +101,14 @@ def _check_model_reply(data: dict, offers: list[OfferLike]) -> None:
         if not isinstance(entry.get("call_id"), str):
             raise BadReply(f"ranked[{i}].call_id must be a string")
         score = entry.get("score")
-        if isinstance(score, bool) or not isinstance(score, int | float) or not math.isfinite(score):
+        if isinstance(score, bool) or not isinstance(score, int | float):
             raise BadReply(f"score for {entry['call_id']!r} must be a finite number from 0 to 100")
+        if isinstance(score, float) and not math.isfinite(score):
+            raise BadReply(f"score for {entry['call_id']!r} must be a finite number from 0 to 100")
+        # Native comparison first: a huge JSON integer would raise OverflowError on float() and skip the retry.
         if not 0 <= score <= 100:
-            raise BadReply(f"score for {entry['call_id']!r} is {score}; it must be from 0 to 100")
+            shown = str(score) if len(str(score)) <= 20 else f"{str(score)[:12]}... ({len(str(score))} digits)"
+            raise BadReply(f"score for {entry['call_id']!r} is {shown}; it must be from 0 to 100")
     ranked_ids = [entry["call_id"] for entry in ranked]
     if sorted(ranked_ids) != sorted(ids):
         raise BadReply(f"ranked must cover every offer exactly once; got {ranked_ids}, expected {ids}")

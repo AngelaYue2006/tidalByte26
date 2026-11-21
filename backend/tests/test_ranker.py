@@ -137,6 +137,9 @@ def test_bad_json_is_retried_once_with_the_problem_named():
         (json.dumps({"winner_call_id": "a", "ranked": [{"call_id": "a", "score": 150}], "tradeoff": "x"}), "must be from 0 to 100"),
         (json.dumps({"winner_call_id": "a", "ranked": [{"call_id": "a", "score": -1}], "tradeoff": "x"}), "must be from 0 to 100"),
         (json.dumps({"winner_call_id": "a", "ranked": "a", "tradeoff": "x"}), "non-empty list"),
+        ('{"winner_call_id": "a", "ranked": [{"call_id": "a", "score": ' + "9" * 401 + '}], "tradeoff": "x"}', "401 digits"),
+        ('{"winner_call_id": "a", "ranked": [{"call_id": "a", "score": -' + "9" * 401 + '}], "tradeoff": "x"}', "must be from 0 to 100"),
+        ('{"winner_call_id": "a", "ranked": [{"call_id": "a", "score": 1e400}], "tradeoff": "x"}', "finite number"),
     ],
 )
 def test_semantically_wrong_replies_are_retried(bad, problem):
@@ -146,8 +149,14 @@ def test_semantically_wrong_replies_are_retried(bad, problem):
     assert problem in client.calls[1]["user"]
 
 
-def test_recovery_after_a_malformed_entry_serialises_cleanly():
-    bad = '{"winner_call_id": "a", "ranked": [{"call_id": "a", "score": NaN}], "tradeoff": "x"}'
+@pytest.mark.parametrize(
+    "bad",
+    [
+        '{"winner_call_id": "a", "ranked": [{"call_id": "a", "score": NaN}], "tradeoff": "x"}',
+        '{"winner_call_id": "a", "ranked": [{"call_id": "a", "score": ' + "9" * 401 + '}], "tradeoff": "x"}',
+    ],
+)
+def test_recovery_after_a_malformed_entry_serialises_cleanly(bad):
     decision = rank([BRIGHT], WINDOWS, "cheapest", client=ScriptedClient(bad, GOOD))
     Draft202012Validator(SCHEMA).validate(decision)
     assert json.loads(json.dumps(decision, allow_nan=False))["score"] == 92.0
