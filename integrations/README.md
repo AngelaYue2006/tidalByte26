@@ -180,13 +180,15 @@ viewer visibility, and publish each event once. `events.emit` expects type
 separate from the payload, so the shim removes `type` before passing that payload.
 Do not have both the recorder and shim emit the same transcript twice.
 
-**Backend wiring is pending.** Main still has skeletons for the live proxy and
-event bus. Proposed PR #58 defines `record_turn(engine, call_id, speaker, text)`;
-PR #55 defines the event emitter. The simulator provides callback injection but
-does not invent a new HTTP endpoint or import/write backend state. A backend
-owner must supply the shared callback shim; a callback-spy test is not proof of
-end-to-end dashboard delivery. Keep #13 draft/blocked until that acceptance is
-verified against the landed backend callback.
+**Shared live-proxy callback acceptance is pending.** The event bus (#55) and
+orchestrator bridge (#75) are now on main. The merged bridge uses this simulator
+when present, and the combined pipeline tests pass with it. The live proxy's
+common recorder remains in open PR #58 (`record_turn(engine, call_id, speaker,
+text)`). The simulator does not invent an HTTP endpoint or import/write backend
+state. A backend owner must route both mock and live transcripts through that
+same recorder and verify it after #58 lands. Keep #13 draft/blocked until this
+remaining acceptance is verified; the merged mock bridge alone does not prove
+that live and mock share their recorder.
 
 `start_call` returns immediately and schedules timed playback; the context exits
 only after playback finishes, or cancels pending tasks on failure/cancellation.
