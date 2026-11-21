@@ -57,3 +57,25 @@ def test_startup_creates_every_table_from_the_data_model(client):
 def test_create_app_refuses_live_mode_with_missing_values():
     with pytest.raises(MissingSetting, match="NEMOTRON_LIGHTNING_ID"):
         create_app(load_settings(env_file=None, environ={**ENV, "VOICE_MODE": "live"}))
+
+
+def test_app_loggers_reach_a_handler_under_a_bare_server():
+    """uvicorn configures only its own loggers; create_app gives the root logger a handler so the webhook evidence lines are not dropped."""
+    import logging
+
+    from app.config import load_settings
+    from app.main import create_app
+
+    root = logging.getLogger()
+    saved_handlers, saved_level = root.handlers[:], root.level
+    root.handlers[:] = []
+    root.setLevel(logging.WARNING)
+    try:
+        create_app(load_settings(env_file=None, environ={"APP_ENV": "development", "DATABASE_URL": "sqlite://"}))  # the factory path, as uvicorn takes it
+        assert root.handlers
+        assert logging.getLogger("lifeline.webhooks").getEffectiveLevel() <= logging.INFO
+    finally:
+        for handler in root.handlers[:]:
+            root.removeHandler(handler)
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)

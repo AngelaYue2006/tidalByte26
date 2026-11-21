@@ -10,7 +10,7 @@
 
 ## Acceptance criteria
 
-- [ ] A spoken or typed request produces the redacted request chips within 3 s on device, with the raw text never sent to any network endpoint (verified by the backend log of outbound requests).
+- [ ] A spoken or typed request produces the redacted request chips within 5 s on device (owner decision 2026-11-21, #77: the 4-bit Nano on the demo laptop generates at about 22 tokens/s and re-evaluates the prompt on every request; measured p50 6.7 s, p90 8.6 s, min 4.0 s on the 20-utterance set with thinking off and the model warm, so this line is a target to tune toward, not yet met), with the raw text never sent to any network endpoint (verified by the backend log of outbound requests).
 - [ ] Google Calendar free windows are fetched before any call starts.
 - [ ] Three clinics are found with phone numbers and drive distance, or loaded from the fixture with the fallback label shown.
 - [ ] Three calls start within 2 s of each other; each call card shows live transcript lines and ends with price, slot and insurance.
