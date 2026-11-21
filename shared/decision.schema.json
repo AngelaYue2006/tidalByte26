@@ -1,1 +1,43 @@
-{ "$schema": "https://json-schema.org/draft/2020-12/schema", "title": "decision", "type": "object" }
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeline.local/shared/decision.schema.json",
+  "title": "decision",
+  "description": "Nemotron Super's ranking output over the offers that survived the hard rules.",
+  "type": "object",
+  "properties": {
+    "winner_call_id": { "type": "string", "minLength": 1 },
+    "score": { "type": "number", "description": "Winner's score; higher is better." },
+    "reasons": {
+      "type": "array",
+      "description": "Short reason tags for the winner, rendered as accent chips.",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 2
+    },
+    "second": {
+      "type": "array",
+      "description": "Secondary facts about the winner, rendered as plain chips.",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "tradeoff": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One sentence naming what the runner-up did better and why it lost."
+    },
+    "ranked": {
+      "type": "array",
+      "description": "Every surviving offer with its score, best first.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "call_id": { "type": "string", "minLength": 1 },
+          "score": { "type": "number" }
+        },
+        "required": ["call_id", "score"],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "required": ["winner_call_id", "score", "reasons", "second", "tradeoff", "ranked"],
+  "additionalProperties": false
+}

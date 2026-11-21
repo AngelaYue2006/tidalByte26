@@ -1,1 +1,108 @@
-{ "$schema": "https://json-schema.org/draft/2020-12/schema", "title": "task", "type": "object" }
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeline.local/shared/task.schema.json",
+  "title": "task",
+  "description": "Task projection returned by GET /api/tasks/{id} and inside the SSE snapshot. The owner variant carries request_text; the contact variant never does.",
+  "oneOf": [
+    { "$ref": "#/$defs/owner_task" },
+    { "$ref": "#/$defs/contact_task" }
+  ],
+  "$defs": {
+    "status": {
+      "type": "string",
+      "enum": ["intake", "calendar", "places", "calling", "ranking", "awaiting_approval", "booking", "transport", "awaiting_contact", "completed", "failed", "cancelled"]
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "start": { "type": "string", "format": "date-time" },
+        "end": { "type": "string", "format": "date-time" }
+      },
+      "required": ["start", "end"],
+      "additionalProperties": false
+    },
+    "call_result": {
+      "type": "object",
+      "description": "Structured result of one clinic call, as shown on the call card.",
+      "properties": {
+        "price": { "type": "string", "description": "Display price, e.g. $95." },
+        "slot": { "type": "string", "description": "Display slot, e.g. Thu 9:30." },
+        "insured": { "type": "boolean" },
+        "slotOk": { "type": "boolean", "description": "True when the slot falls inside a free window." }
+      },
+      "required": ["price", "slot", "insured", "slotOk"],
+      "additionalProperties": false
+    },
+    "call": {
+      "type": "object",
+      "properties": {
+        "call_id": { "type": "string", "minLength": 1 },
+        "clinic": { "type": "string", "minLength": 1 },
+        "meta": { "type": "string", "description": "Distance line, e.g. 1.2 mi · 6 min." },
+        "status": { "type": "string", "enum": ["dialing", "live", "hold", "done"] },
+        "result": { "oneOf": [ { "$ref": "#/$defs/call_result" }, { "type": "null" } ] }
+      },
+      "required": ["call_id", "clinic", "status"],
+      "additionalProperties": false
+    },
+    "booking": {
+      "type": "object",
+      "properties": {
+        "clinic": { "type": "string" },
+        "slot_start": { "type": "string", "format": "date-time" },
+        "slot_end": { "type": "string", "format": "date-time" },
+        "price": { "type": "string" },
+        "status": { "type": "string", "enum": ["confirmed", "tentative", "rejected"] },
+        "confirmation_ref": { "type": ["string", "null"] },
+        "calendar_event_id": { "type": ["string", "null"], "description": "Set only after the single calendar insert." }
+      },
+      "required": ["clinic", "slot_start", "slot_end", "price", "status"],
+      "additionalProperties": false
+    },
+    "transport": {
+      "type": "object",
+      "properties": {
+        "available": { "type": "boolean" },
+        "reason": { "type": "string", "description": "Error code, e.g. UNAVAILABLE_ACCESSIBLE_RIDE." },
+        "simulated": { "type": "boolean" }
+      },
+      "required": ["available", "reason", "simulated"],
+      "additionalProperties": false
+    },
+    "base_task": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "owner_id": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/status" },
+        "viewer_role": { "type": "string", "enum": ["owner", "contact"] },
+        "intake": { "oneOf": [ { "$ref": "intake_request.schema.json" }, { "type": "null" } ] },
+        "chips": { "type": "array", "items": { "type": "string" } },
+        "windows": { "type": "array", "items": { "$ref": "#/$defs/window" } },
+        "calls": { "type": "array", "items": { "$ref": "#/$defs/call" } },
+        "decision": { "oneOf": [ { "$ref": "decision.schema.json" }, { "type": "null" } ] },
+        "booking": { "oneOf": [ { "$ref": "#/$defs/booking" }, { "type": "null" } ] },
+        "transport": { "oneOf": [ { "$ref": "#/$defs/transport" }, { "type": "null" } ] },
+        "failure_reason": { "type": ["string", "null"], "description": "Error code when status is failed." },
+        "request_text": { "type": ["string", "null"], "description": "Raw utterance. Owner variant only; it never reaches the contact." },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "owner_id", "status", "viewer_role", "intake", "chips", "windows", "calls", "decision", "booking", "transport", "created_at", "updated_at"],
+      "additionalProperties": false
+    },
+    "owner_task": {
+      "allOf": [
+        { "$ref": "#/$defs/base_task" },
+        { "properties": { "viewer_role": { "const": "owner" } } }
+      ]
+    },
+    "contact_task": {
+      "allOf": [
+        { "$ref": "#/$defs/base_task" },
+        { "properties": { "viewer_role": { "const": "contact" } } },
+        { "not": { "required": ["request_text"] } }
+      ]
+    }
+  }
+}
