@@ -100,7 +100,7 @@ def test_receptionist_scripts_produce_prototype_lines(receptionists: list[dict])
     assert ("clinic", "Yes, we do. A cleaning is $95 with Delta.") in lines["bright_smile"]
     assert ("clinic", "Thursday at 9:30 is open.") in lines["bright_smile"]
     assert ("clinic", "Our next opening is Friday at 4. It's $120 with Delta.") in lines["smile_co"]
-    assert ("clinic", "Sorry for the wait. We're $140, earliest is next Monday.") in lines["oak_dental"]
+    assert ("clinic", "We take Delta. We're $140, earliest is next Monday.") in lines["oak_dental"]
     for r in receptionists:
         for ln in r["lines"]:
             assert ln["speaker"] in {"agent", "clinic"}
@@ -109,3 +109,15 @@ def test_receptionist_scripts_produce_prototype_lines(receptionists: list[dict])
         statuses = [s["status"] for s in r["status_changes"]]
         assert statuses[0] == "dialing" and statuses[-1] == "done"
         assert set(statuses) <= {"dialing", "live", "hold", "done"}
+        assert r["status_changes"][-1]["at_ms"] > at[-1], "the call ends after its last line"
+
+
+def test_agent_discloses_ai_speaks_only_redacted_facts_and_books_nothing(receptionists: list[dict]) -> None:
+    """Product rules 1, 2 and 5: AI disclosure on every call, no owner name, no hold or booking before approval."""
+    for r in receptionists:
+        agent_lines = [ln["text"] for ln in r["lines"] if ln["speaker"] == "agent"]
+        assert any(t.startswith("Hi, I'm an AI assistant calling for a patient.") for t in agent_lines), r["clinic_id"]
+        for text in agent_lines:
+            low = text.lower()
+            assert "mary" not in low and "johnson" not in low, (r["clinic_id"], text)
+            assert "hold that" not in low and "book it" not in low and "reserve" not in low, (r["clinic_id"], text)

@@ -1,5 +1,5 @@
 {
-  "_note": "Scripted receptionists for VOICE_MODE=mock, keyed by clinic id from clinics.json. Lines reproduce the prototype SCENARIO; at_ms is time since the call started. result is the structured call_result; status and chips come from it, never from the lines.",
+  "_note": "Scripted receptionists for VOICE_MODE=mock, keyed by clinic id from clinics.json. Lines follow the prototype SCENARIO with the product rules applied: the agent says it is an AI on every call, speaks only redacted facts and never asks to hold or book before approval. at_ms is time since the call started. result is the structured call_result; status and chips come from it, never from the lines.",
   "simulated": true,
   "receptionists": [
     {
@@ -14,7 +14,7 @@
         { "at_ms": 4400, "speaker": "clinic", "text": "Yes, we do. A cleaning is $95 with Delta." },
         { "at_ms": 6400, "speaker": "agent", "text": "Great. Anything Tuesday afternoon or Thursday morning?" },
         { "at_ms": 8600, "speaker": "clinic", "text": "Thursday at 9:30 is open." },
-        { "at_ms": 9400, "speaker": "agent", "text": "Perfect, please hold that for Mary Johnson. Thank you!" }
+        { "at_ms": 9400, "speaker": "agent", "text": "Thank you. I'll check with the patient and call back to book." }
       ],
       "result": {
         "price_usd": 95,
@@ -58,11 +58,14 @@
         { "at_ms": 0, "status": "dialing" },
         { "at_ms": 1900, "status": "hold" },
         { "at_ms": 10200, "status": "live" },
-        { "at_ms": 11500, "status": "done" }
+        { "at_ms": 15200, "status": "done" }
       ],
       "lines": [
         { "at_ms": 2400, "speaker": "clinic", "text": "Thanks for calling Oak Dental, please hold…" },
-        { "at_ms": 10400, "speaker": "clinic", "text": "Sorry for the wait. We're $140, earliest is next Monday." }
+        { "at_ms": 10400, "speaker": "clinic", "text": "Sorry for the wait. How can I help?" },
+        { "at_ms": 11200, "speaker": "agent", "text": "Hi, I'm an AI assistant calling for a patient. Do you take Delta Dental, and is there a cleaning open this week?" },
+        { "at_ms": 13600, "speaker": "clinic", "text": "We take Delta. We're $140, earliest is next Monday." },
+        { "at_ms": 14800, "speaker": "agent", "text": "Thank you. I'll check with the patient and call back." }
       ],
       "result": {
         "price_usd": 140,
