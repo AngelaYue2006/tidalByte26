@@ -218,9 +218,12 @@ class Pipeline:
         confirmation = self.deps.voice.confirm_booking(spec, slot)
         if confirmation.status == "rejected":
             raise PipelineFailure("BOOKING_REJECTED", f"{winner.clinic} did not confirm the appointment: {confirmation.evidence}")
-        run.booking = Booking(clinic=winner.clinic, slot_start=winner.slot_start, slot_end=winner.slot_end, price=money(winner.price),
-                              status=confirmation.status, confirmation_ref=confirmation.confirmation_ref)
         address = spec.clinic.address
+        booking_fields = {"clinic": winner.clinic, "slot_start": winner.slot_start, "slot_end": winner.slot_end, "price": money(winner.price),
+                          "status": confirmation.status, "confirmation_ref": confirmation.confirmation_ref}
+        if "address" in Booking.model_fields:  # the calendar adapter (#28) reads the clinic address from the Booking once its type carries it
+            booking_fields["address"] = address
+        run.booking = Booking(**booking_fields)
         if confirmation.status == "confirmed":
             receipt = self.deps.create_event(run.owner.id, run.booking, f"{run.task_id}:calendar")  # once, keyed by task
             run.booking = run.booking.model_copy(update={"calendar_event_id": receipt.event_id})

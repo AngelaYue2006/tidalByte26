@@ -100,6 +100,12 @@ def test_t1_standard_run_produces_the_full_event_sequence(client):
     assert r.status_code == 200 and r.json()["applied"] is True
     task = wait_for(client, task_id, "awaiting_contact")
     assert task["booking"]["status"] == "confirmed" and task["booking"]["calendar_event_id"].startswith("mock-calendar-")
+    from integrations.types import Booking
+
+    if "address" in Booking.model_fields:  # #28's calendar adapter reads it; the field lands with PR #70
+        assert task["booking"]["address"] == "123 Main St, Chicago, IL 60601"
+    else:
+        assert "address" not in task["booking"]
     assert task["transport"] == {"available": False, "reason": "UNAVAILABLE_ACCESSIBLE_RIDE", "simulated": True}
     assert client.voice.confirmed == ["a"]
 
