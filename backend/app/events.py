@@ -121,6 +121,9 @@ class Subscription:
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
 
 
+RESET_SIGNAL = 0  # queued instead of an event id when the tables were wiped: the stream starts over with a snapshot
+
+
 class EventBus:
     """In-process fan-out. `publish` may be called from any thread; each subscriber's queue is fed on its own loop."""
 
@@ -159,6 +162,20 @@ class EventBus:
                 continue
             fed += 1
         return fed
+
+    def publish_reset(self) -> int:
+        """Tell every subscriber the tables were wiped (demo reset). Event ids restart, so a cursor is meaningless."""
+        with self._lock:
+            subs = list(self._subs)
+        told = 0
+        for sub in subs:
+            try:
+                sub.loop.call_soon_threadsafe(sub.queue.put_nowait, RESET_SIGNAL)
+            except RuntimeError:
+                self.unsubscribe(sub)
+                continue
+            told += 1
+        return told
 
 
 def emit(engine: Engine, bus: EventBus, task_id: str, type: str, payload: dict, visibility: str = "owner") -> Event:

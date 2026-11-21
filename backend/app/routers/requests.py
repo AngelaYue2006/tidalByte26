@@ -26,9 +26,10 @@ class RequestBody(BaseModel):
 async def create_request(body: RequestBody, request: Request, response: Response) -> dict:
     """Create the task and start the pipeline. The same idempotency key returns the same task without a second run."""
     pipeline = request.app.state.pipeline
-    if body.idempotency_key in pipeline.request_keys:
+    existing = pipeline.task_for_request_key(body.idempotency_key)
+    if existing is not None:
         response.status_code = 200
-        return {"task_id": pipeline.request_keys[body.idempotency_key]}
+        return {"task_id": existing}
     if not body.text or not body.text.strip():
         raise HTTPException(status_code=422, detail="text is required; audio_b64 is not supported yet (speech-to-text happens in the browser)")
     try:
@@ -40,7 +41,7 @@ async def create_request(body: RequestBody, request: Request, response: Response
         session.add(task)
         session.flush()
         task_id = task.id
-    pipeline.request_keys[body.idempotency_key] = task_id
+    pipeline.remember_request_key(body.idempotency_key, task_id)
     pipeline.start(task_id, body.text.strip())
     return {"task_id": task_id}
 

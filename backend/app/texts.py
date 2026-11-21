@@ -11,9 +11,7 @@ from datetime import datetime
 from app.ranking import money, slot_label
 
 
-def chips(
-    care_type: str, budget_max: float | None, carrier: str | None, windows: list
-) -> list[str]:
+def chips(care_type: str, budget_max: float | None, carrier: str | None, windows: list) -> list[str]:
     out = [care_type[:1].upper() + care_type[1:]]
     if budget_max is not None:
         out.append(f"Max {money(budget_max)}")
@@ -55,9 +53,7 @@ def approval_sms(clinic: str, start: datetime, price: float) -> str:
     return f"LifeLine: Best option is {clinic}, {slot_label(start)} for {money(price)}. Reply YES to book, or tap Approve."
 
 
-def contact_request_message(
-    owner_first_name: str, care_type: str, clinic: str, start: datetime, address: str
-) -> str:
+def contact_request_message(owner_first_name: str, care_type: str, clinic: str, start: datetime, address: str) -> str:
     return (
         f"LifeLine: {owner_first_name} has a {care_type} at {clinic}, {day_and_time(start)}, {address}. "
         f"No accessible ride is available. Can you drive {owner_first_name}? Reply YES or NO."
@@ -68,23 +64,18 @@ def ride_confirmed_sms_user(driver: str, clinic: str, start: datetime) -> str:
     return f"LifeLine: {driver} will drive you to {clinic} on {day_and_time(start)}."
 
 
-def ride_confirmed_sms_contact(
-    owner_first_name: str, clinic: str, start: datetime
-) -> str:
+def ride_confirmed_sms_contact(owner_first_name: str, clinic: str, start: datetime) -> str:
     return f"LifeLine: Thank you. Ride confirmed for {owner_first_name}'s appointment at {clinic}, {day_and_time(start)}."
 
 
-def no_ride_needed_sms_contact(
-    owner_first_name: str, clinic: str, start: datetime, address: str
-) -> str:
+def no_ride_needed_sms_contact(owner_first_name: str, clinic: str, start: datetime, address: str) -> str:
     return f"LifeLine: Appointment booked for {owner_first_name} — {clinic}, {day_and_time(start)}, {address}."
 
 
-def contact_declined_sms_user(
-    contact_first_name: str, clinic: str, start: datetime
-) -> str:
+def contact_declined_sms_user(contact_first_name: str, clinic: str, start: datetime) -> str:
     return f"LifeLine: {contact_first_name} can't drive you to {clinic} on {day_and_time(start)}. We're still looking for a ride and will text you."
 
 
 def contact_declined_sms_contact(owner_first_name: str) -> str:
     return f"LifeLine: Thanks for letting us know. We'll keep looking for a ride for {owner_first_name}."
+

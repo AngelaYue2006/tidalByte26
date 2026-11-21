@@ -17,20 +17,9 @@ INTAKE_OUTPUT_SCHEMA: dict = {
         "time_phrase": {"type": "string"},
         "needs_ride": {"type": "boolean"},
         "search_area": {"type": ["string", "null"]},
-        "dropped_fields": {
-            "type": "array",
-            "items": {"type": "string", "enum": list(DROPPABLE_FIELDS)},
-        },
+        "dropped_fields": {"type": "array", "items": {"type": "string", "enum": list(DROPPABLE_FIELDS)}},
     },
-    "required": [
-        "care_type",
-        "budget_max",
-        "insurance_carrier",
-        "time_phrase",
-        "needs_ride",
-        "search_area",
-        "dropped_fields",
-    ],
+    "required": ["care_type", "budget_max", "insurance_carrier", "time_phrase", "needs_ride", "search_area", "dropped_fields"],
 }
 
 _INTAKE_SYSTEM = """You are the on-device intake step for LifeLine, an assistant that books medical appointments for older adults.
@@ -50,10 +39,7 @@ Return the JSON object and nothing else."""
 
 def intake_system_prompt(*, timezone: str) -> str:
     """System prompt for Nano. Takes only the timezone from the user record; nothing else about the user goes in."""
-    return (
-        _INTAKE_SYSTEM.format(dropped=", ".join(DROPPABLE_FIELDS))
-        + f"\nThe speaker's timezone is {timezone}."
-    )
+    return _INTAKE_SYSTEM.format(dropped=", ".join(DROPPABLE_FIELDS)) + f"\nThe speaker's timezone is {timezone}."
 
 
 def intake_output_schema_json() -> str:
@@ -63,6 +49,7 @@ def intake_output_schema_json() -> str:
 # --- call agent (Lightning), #20 -----------------------------------------------------------------
 
 OPENING_LINE = "Hi, I'm an AI assistant calling for a patient."
+
 
 
 def _clock(when: datetime) -> str:
@@ -80,14 +67,8 @@ def _money(amount: float) -> str:
 
 def call_agent(spec: CallSpec) -> str:
     """Per-call system prompt for Lightning. Built only from the redacted CallSpec: no name, no member ID, nothing Nano dropped."""
-    windows = (
-        ", ".join(window_label(s, e) for s, e in spec.windows) or "any time this week"
-    )
-    budget = (
-        f"The patient's budget is {_money(spec.budget_max)} at most."
-        if spec.budget_max is not None
-        else ""
-    )
+    windows = ", ".join(window_label(s, e) for s, e in spec.windows) or "any time this week"
+    budget = f"The patient's budget is {_money(spec.budget_max)} at most." if spec.budget_max is not None else ""
     carrier = (
         f"The patient has {spec.insurance_carrier}; ask whether the clinic takes it."
         if spec.insurance_carrier
@@ -127,25 +108,16 @@ Use only what the receptionist actually said. Never guess a price or a time. Res
 """
 
 
-def call_summary_user(
-    transcript: list[dict], *, call_date_iso: str, timezone: str
-) -> str:
+def call_summary_user(transcript: list[dict], *, call_date_iso: str, timezone: str) -> str:
     """Facts-only user message: the transcript lines (agent and clinic speech only) plus the date context."""
     lines = [f"{t.get('speaker', '?')}: {t.get('text', '')}" for t in transcript]
-    return json.dumps(
-        {"call_date": call_date_iso, "timezone": timezone, "transcript": lines},
-        ensure_ascii=False,
-    )
+    return json.dumps({"call_date": call_date_iso, "timezone": timezone, "transcript": lines}, ensure_ascii=False)
 
 
 # ---- contact message (step 9, product rule 4) ---------------------------------------------------------------------
 
 # What Nano must return for the contact message. Ollama enforces this as `format`; local_intake checks the text.
-CONTACT_MESSAGE_SCHEMA: dict = {
-    "type": "object",
-    "properties": {"message": {"type": "string"}},
-    "required": ["message"],
-}
+CONTACT_MESSAGE_SCHEMA: dict = {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}
 
 _CONTACT_SYSTEM = """You are the on-device message writer for LifeLine, an assistant that books medical appointments for older adults.
 You receive the owner's full record, the booked appointment and the emergency contact. Write ONE short text message
@@ -166,3 +138,4 @@ Return ONLY a JSON object: {"message": "..."}."""
 def contact_system_prompt() -> str:
     """System prompt for Nano's contact message. The record itself goes in the user message, on the device only."""
     return _CONTACT_SYSTEM
+
