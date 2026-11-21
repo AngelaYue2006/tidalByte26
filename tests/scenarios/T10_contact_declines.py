@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from harness import CONTACT, CONTACT_PHONE, Lab
+from harness import CONTACT, CONTACT_PHONE, OWNER_PHONE, Lab
 
 
 def booked_and_waiting(lab: Lab) -> str:
@@ -40,8 +40,11 @@ def test_t10_dashboard_decline_keeps_the_task_open_and_tells_the_owner(lab: Lab)
 @pytest.mark.xfail(reason="#23 (PR #81): the contact's SMS reply through POST /api/webhooks/twilio/sms is not merged yet", strict=False)
 def test_t10_sms_no_keeps_waiting_and_a_later_yes_confirms(lab: Lab):
     task_id = booked_and_waiting(lab)
+    owner_texts = len(lab.sms_to(OWNER_PHONE))
     assert lab.twilio_sms(CONTACT_PHONE, "NO", "SM-t10-no").status_code == 200
     lab.settle(0.3)
+    assert len(lab.sms_to(OWNER_PHONE)) == owner_texts + 1, "the owner gets one text about the decline"
+    assert [e["type"] for e in lab.events(task_id)][-2:] == ["contact_reply", "task_updated"], "the reply and the owner's note land together"
     assert lab.task(task_id)["status"] == "awaiting_contact"
     reply = lab.of_type(task_id, "contact_reply")[-1]
     assert reply["offer"]["can_drive"] is False and "ride_confirmed" not in lab.types(task_id)
