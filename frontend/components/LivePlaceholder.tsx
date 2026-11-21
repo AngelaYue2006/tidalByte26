@@ -5,11 +5,13 @@ import { useSearchParams } from "next/navigation";
 import CallCard from "@/components/CallCard";
 import Confirmations from "@/components/Confirmations";
 import ContactReply from "@/components/ContactReply";
+import DecisionCard from "@/components/DecisionCard";
 import RequestBar from "@/components/RequestBar";
 import TransportCard from "@/components/TransportCard";
 import { foldEvents, type DashboardState } from "@/lib/dashboard";
 import type { LiveEvent } from "@/lib/events";
 import { connectLive, liveUrl } from "@/lib/live";
+import { projectForViewer } from "@/lib/project";
 import { PROTOTYPE_SCENARIO } from "@/lib/scenario";
 import { viewerFromSearchParams } from "@/lib/viewer";
 
@@ -41,18 +43,34 @@ const TRANSPORT_EVENTS: LiveEvent[] = [
   },
 ];
 
-const PREVIEW_EVENTS: LiveEvent[] = [...PROTOTYPE_SCENARIO, ...TRANSPORT_EVENTS];
+const APPROVAL_EVENTS: LiveEvent[] = [
+  {
+    type: "approval_required",
+    pick: { clinic: "Bright Smile Dental", slot: "Thu 9:30", price: "$95" },
+    expires_at: "in 10 min",
+  },
+];
+
+/** Full demo trail including approval + transport + confirmations. */
+const PREVIEW_EVENTS: LiveEvent[] = [
+  ...PROTOTYPE_SCENARIO.filter((e) => e.type !== "booked" && e.type !== "notified"),
+  ...APPROVAL_EVENTS,
+  { type: "approved", by: "Mary Johnson", via: "dashboard" },
+  ...TRANSPORT_EVENTS,
+  ...PROTOTYPE_SCENARIO.filter((e) => e.type === "booked" || e.type === "notified"),
+];
 const PREVIEW_STATE = foldEvents(PREVIEW_EVENTS);
 
-/** Awaiting-reply preview: transport + contact_request only (for contact buttons). */
+/** Owner mid-approval + contact awaiting ride reply. */
 const AWAITING_EVENTS: LiveEvent[] = [
   ...PROTOTYPE_SCENARIO.filter((e) => e.type !== "booked" && e.type !== "notified"),
+  ...APPROVAL_EVENTS,
   TRANSPORT_EVENTS[0],
   TRANSPORT_EVENTS[1],
 ];
 const AWAITING_STATE = foldEvents(AWAITING_EVENTS);
 
-/** Live page: RequestBar, CallCards, transport/contact, confirmations. */
+/** Live page with role-scoped projection for owner and contact. */
 export default function LivePlaceholder() {
   const searchParams = useSearchParams();
   const viewer = viewerFromSearchParams(searchParams);
@@ -71,35 +89,39 @@ export default function LivePlaceholder() {
     return close;
   }, [viewer.viewerId]);
 
-  const state = useMemo(() => {
-    if (liveState && (liveState.calls.length > 0 || liveState.transport || liveState.confirmations)) {
+  const rawState = useMemo(() => {
+    if (liveState && (liveState.calls.length > 0 || liveState.transport || liveState.decision)) {
       return liveState;
     }
     if (previewAwaiting) return AWAITING_STATE;
     if (preview) return PREVIEW_STATE;
-    return liveState;
+    return liveState ?? { calls: [] };
   }, [liveState, preview, previewAwaiting]);
+
+  const state = useMemo(
+    () => projectForViewer(rawState, viewer.role),
+    [rawState, viewer.role],
+  );
 
   const mode = process.env.NEXT_PUBLIC_LIVE_STREAM_MODE ?? "sse";
   const chips =
-    state?.request?.chips ??
+    state.request?.chips ??
     ((preview || previewAwaiting) && PREVIEW_REQUEST?.type === "request"
       ? PREVIEW_REQUEST.chips
       : undefined);
-  const liveText = viewer.role === "owner" ? state?.request?.text : undefined;
+  // Projection already stripped text for contact; never pass raw text as fallback for contact.
   const requestText =
-    liveText ??
-    ((preview || previewAwaiting) &&
-    viewer.role === "owner" &&
-    PREVIEW_REQUEST?.type === "request"
-      ? PREVIEW_REQUEST.text
-      : undefined);
-  const winnerId = state?.decision?.winner;
-  const calls = state?.calls ?? [];
+    viewer.role === "owner"
+      ? (state.request?.text ??
+        ((preview || previewAwaiting) && PREVIEW_REQUEST?.type === "request"
+          ? PREVIEW_REQUEST.text
+          : undefined))
+      : undefined;
+  const winnerId = state.decision?.winner;
+  const calls = state.calls;
   const taskId =
-    state?.taskId ?? (preview || previewAwaiting ? "preview-task" : undefined);
-  const awaitingReply = !!state?.contact?.message && !state?.contact?.reply;
-  const showConfirmations = !!state?.confirmations?.booked || !!state?.confirmations?.notified;
+    state.taskId ?? (preview || previewAwaiting ? "preview-task" : undefined);
+  const showConfirmations = !!state.confirmations?.booked || !!state.confirmations?.notified;
 
   return (
     <main>
@@ -117,33 +139,44 @@ export default function LivePlaceholder() {
         </section>
       ) : null}
 
+      {state.decision ? (
+        <DecisionCard
+          viewer={viewer}
+          decision={state.decision}
+          approval={state.approval}
+          taskId={taskId}
+        />
+      ) : null}
+
       <TransportCard
-        transport={state?.transport}
-        contact={state?.contact}
-        ride={state?.confirmations?.ride}
+        transport={state.transport}
+        contact={state.contact}
+        ride={state.confirmations?.ride}
       />
 
       <ContactReply
         viewer={viewer}
         taskId={taskId}
-        awaitingReply={awaitingReply}
-        hasReply={!!state?.contact?.reply}
+        awaitingReply={state.canReplyRide}
+        hasReply={!!state.contact?.reply}
       />
 
-      {viewer.role === "owner" && awaitingReply ? (
+      {viewer.role === "owner" && state.contact?.message && !state.contact?.reply ? (
         <div className="card status-card">
           <p className="muted status-card-text">
-            Waiting for {state?.contact?.name ?? "the contact"} to reply about the ride.
+            Waiting for {state.contact.name ?? "the contact"} to reply about the ride.
           </p>
         </div>
       ) : null}
 
-      <Confirmations confirmations={state?.confirmations} show={showConfirmations} />
+      <Confirmations confirmations={state.confirmations} show={showConfirmations} />
 
       <div className="card status-card">
         <p className="faint placeholder-meta status-card-text">
+          Viewing as <strong>{viewer.role}</strong>
+          {" · "}
           {mode === "poll" ? "Poll mode" : "SSE"} → <code>{sse}</code>
-          {preview || previewAwaiting ? " · preview scenario" : ""}
+          {preview || previewAwaiting ? " · preview" : ""}
         </p>
         {error ? <p className="faint placeholder-meta">{error}</p> : null}
       </div>

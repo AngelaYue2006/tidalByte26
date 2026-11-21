@@ -1,1 +1,45 @@
 """All prompts: intake redaction schema, call agent opening line and goals, ranking rubric, contact message scope. The agent always opens with: Hi, I am an AI assistant calling for a patient."""
+
+from __future__ import annotations
+
+import json
+
+from app.nemotron.types import DROPPABLE_FIELDS
+
+# What Nano must return. Ollama enforces this as `format`; the code validates it again.
+INTAKE_OUTPUT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "care_type": {"type": "string"},
+        "budget_max": {"type": ["number", "null"]},
+        "insurance_carrier": {"type": ["string", "null"]},
+        "time_phrase": {"type": "string"},
+        "needs_ride": {"type": "boolean"},
+        "search_area": {"type": ["string", "null"]},
+        "dropped_fields": {"type": "array", "items": {"type": "string", "enum": list(DROPPABLE_FIELDS)}},
+    },
+    "required": ["care_type", "budget_max", "insurance_carrier", "time_phrase", "needs_ride", "search_area", "dropped_fields"],
+}
+
+_INTAKE_SYSTEM = """You are the on-device intake step for LifeLine, an assistant that books medical appointments for older adults.
+Read one spoken request and return ONLY a JSON object with exactly these keys:
+
+- care_type: what the appointment is for, in two or three plain words (e.g. "dental cleaning", "eye exam", "flu shot"). If several are asked for, the one the speaker wants first.
+- budget_max: the price cap in US dollars as a number, or null if none was stated. Spelled-out amounts count ("two hundred" -> 200, "one fifty" -> 150).
+- insurance_carrier: the insurance company name only, or null if none was stated or the speaker has none. Normalise to the full name: "Delta" -> "Delta Dental", "Blue Cross" -> "Blue Cross Blue Shield", "United" -> "UnitedHealthcare". Never include a member or policy number.
+- time_phrase: when they want it, as a short phrase from this list when one fits: "this week", "next week", "tomorrow", "this month", "next month", "within two weeks", "any". Use "any" when no time is mentioned.
+- needs_ride: true if the speaker cannot get there alone (no car, cannot drive, needs a ride, cannot take the bus), else false.
+- search_area: a city or neighbourhood name if one is given (e.g. "Evanston, IL"), otherwise "near home". Never a street address.
+- dropped_fields: the names of the kinds of information you left out, from this list only: {dropped}. Empty list if nothing had to be removed.
+
+Remove everything a clinic receptionist does not need: symptoms and conditions, medications, the member or policy ID, the date of birth, the home or street address, any phone number, the speaker's name, and mobility details (a walker, a bad knee). Record each removed kind in dropped_fields. Never copy any of those values into any field.
+Return the JSON object and nothing else."""
+
+
+def intake_system_prompt(*, timezone: str) -> str:
+    """System prompt for Nano. Takes only the timezone from the user record; nothing else about the user goes in."""
+    return _INTAKE_SYSTEM.format(dropped=", ".join(DROPPABLE_FIELDS)) + f"\nThe speaker's timezone is {timezone}."
+
+
+def intake_output_schema_json() -> str:
+    return json.dumps(INTAKE_OUTPUT_SCHEMA)

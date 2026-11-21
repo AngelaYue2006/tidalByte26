@@ -1,5 +1,8 @@
 // fetch wrappers: postRequest, approve, contactOffer, getTasks, getTask, getEvents.
-// Every call carries viewer_id from the role picker (URL).
+// Every call carries viewer_id from the role picker (URL) and goes through apiFetch, which
+// fetches the dashboard session cookie once and retries once on a 401 (lib/session.ts).
+
+import { apiFetch } from "@/lib/session";
 
 function withViewer(path: string, viewerId: string, extra?: Record<string, string>): string {
   const params = new URLSearchParams({ viewer_id: viewerId, ...extra });
@@ -29,23 +32,26 @@ async function parseJson<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** History list — viewer-scoped. Shape: Task[] or { tasks: Task[] }. */
 export async function getTasks(viewerId: string, limit = 20): Promise<unknown> {
-  return parseJson(await fetch(tasksUrl(viewerId, limit)));
+  return parseJson(await apiFetch(tasksUrl(viewerId, limit)));
 }
 
+/** Single task projection for the current viewer. */
 export async function getTask(taskId: string, viewerId: string): Promise<unknown> {
-  return parseJson(await fetch(taskUrl(taskId, viewerId)));
+  return parseJson(await apiFetch(taskUrl(taskId, viewerId)));
 }
 
+/** Ordered events for a task, filtered by viewer visibility. */
 export async function getEvents(taskId: string, viewerId: string): Promise<unknown> {
-  return parseJson(await fetch(taskEventsUrl(taskId, viewerId)));
+  return parseJson(await apiFetch(taskEventsUrl(taskId, viewerId)));
 }
 
 export async function postRequest(
   viewerId: string,
   body: { owner_id: string; actor_id: string; text?: string; audio_b64?: string; idempotency_key: string },
 ): Promise<unknown> {
-  const res = await fetch(`/api/requests?viewer_id=${encodeURIComponent(viewerId)}`, {
+  const res = await apiFetch(`/api/requests?viewer_id=${encodeURIComponent(viewerId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -58,7 +64,7 @@ export async function approve(
   viewerId: string,
   body: { actor_id: string; decision: "approve" | "reject"; idempotency_key: string },
 ): Promise<unknown> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/tasks/${encodeURIComponent(taskId)}/approve?viewer_id=${encodeURIComponent(viewerId)}`,
     {
       method: "POST",
@@ -78,7 +84,7 @@ export async function contactOffer(
     idempotency_key: string;
   },
 ): Promise<unknown> {
-  const res = await fetch(`/api/contacts/offers?viewer_id=${encodeURIComponent(viewerId)}`, {
+  const res = await apiFetch(`/api/contacts/offers?viewer_id=${encodeURIComponent(viewerId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
