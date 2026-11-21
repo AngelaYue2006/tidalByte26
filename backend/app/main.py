@@ -24,7 +24,6 @@ from app.routers import (
     llm_proxy,
     requests,
     tasks,
-    twilio_sms,
     webhooks,
 )
 
@@ -65,10 +64,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         32
     )
     app.state.heartbeat_seconds = live.HEARTBEAT_SECONDS
-    app.state.pipeline = Pipeline(deps or build_deps(settings), engine, app.state.bus)
-    app.state.inbound_sms_seen = (
-        set()
-    )  # MessageSids already answered; the stub's idempotency key
+    app.state.pipeline = Pipeline(deps or build_deps(settings), engine, app.state.bus, approval_timeout_s=settings.approval_timeout_min * 60)
     app.include_router(demo.router)
     app.include_router(session.router)
     app.include_router(live.router)
@@ -78,9 +74,6 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     app.include_router(contacts.router)
     app.include_router(webhooks.router)
     app.include_router(llm_proxy.router)
-    if settings.twilio_kickoff_stub:
-        # The #7 tunnel stub has no signature check, so it is never part of the normal app (TWILIO_KICKOFF_STUB=1 only).
-        app.include_router(twilio_sms.router)
     return app
 
 

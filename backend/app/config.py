@@ -60,6 +60,7 @@ class MissingSetting(Exception):
 class Settings(BaseModel):
     app_env: str = "development"
     app_timezone: str = "America/Chicago"
+    approval_timeout_min: float = 10.0  # one reminder SMS after this; then the task keeps waiting (T6)
     database_url: str = "sqlite:///./lifeline.db"
     public_base_url: str | None = None
     llm_proxy_secret: str | None = None
@@ -86,8 +87,6 @@ class Settings(BaseModel):
     google_maps_api_key: str | None = None
 
     demo_phone_allowlist: tuple[str, ...] = Field(default_factory=tuple)
-    # Mounts the unsigned inbound-SMS stub from the #7 kickoff check. Off unless TWILIO_KICKOFF_STUB=1; never for a demo run.
-    twilio_kickoff_stub: bool = False
 
     voice_mode: Mode = "mock"
     places_mode: PlacesMode = "fixture"
