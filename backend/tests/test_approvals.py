@@ -25,6 +25,7 @@ from tests.test_pipeline_mock import (
 
 OWNER_PHONE = "+15555550100"
 CONTACT_PHONE = "+15555550101"
+STRANGER_PHONE = "+15555550199"  # not on the allowlist
 
 
 def make_client(monkeypatch, tmp_path, *, timeout_min: float = 10.0):
@@ -211,3 +212,17 @@ def test_a_timely_answer_sends_no_reminder(monkeypatch, tmp_path):
         assert not any(e.get("reason") == "APPROVAL_TIMEOUT" for e in events(client, task_id))
     finally:
         client.__exit__(None, None, None)
+
+
+def test_inbound_sms_log_names_the_outcome_but_never_a_number_or_the_text(client, caplog):
+    """From the #7 kickoff stub: what Twilio sent is evidence for the log, the phone numbers and the body are not."""
+    import logging
+
+    task_id = start(client)
+    wait_for(client, task_id, "awaiting_approval")
+    with caplog.at_level(logging.INFO, logger="lifeline.webhooks"):
+        sms(client, "YES", sid="SM-log-1")
+        sms(client, "hello? is this Mary's clinic", sender=STRANGER_PHONE, sid="SM-log-2")
+    assert "'applied': True" in caplog.text and "unverified_sender" in caplog.text
+    for secret in (OWNER_PHONE, STRANGER_PHONE, "hello?", "Mary", task_id, "SM-log"):
+        assert secret not in caplog.text
