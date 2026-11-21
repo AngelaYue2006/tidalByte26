@@ -107,19 +107,25 @@ def conversation_turns(messages: list[dict]) -> tuple[list[dict], int | None, in
     return turns, clinic_seq, n + 1
 
 
-def record_turn(engine: Engine, bus: EventBus, spec: CallSpec, seq: int, speaker: str, text: str) -> Turn | None:
+def record_turn(engine: Engine, bus: EventBus, spec: CallSpec, seq: int, speaker: str, text: str, *, simulated: bool = False) -> Turn | None:
     """Write turn `seq` of this call and its transcript event in ONE transaction, or nothing.
 
     `turns (call_id, seq)` is unique, so of two overlapping retries exactly one INSERT succeeds and carries the event
     row with it; the other hits the constraint, rolls back and writes nothing (invariant 7). The bus is told after
-    commit. A retry whose Lightning wording differs keeps the stored line."""
+    commit. A retry whose Lightning wording differs keeps the stored line.
+
+    Live calls reach this from the proxy; mock and simulator calls reach it from `Pipeline._voice_event` with
+    `simulated=True` (#87), so both kinds of call leave the same rows and the same event, labelled honestly."""
     if not text:
         return None
+    payload = {"call_id": spec.call_id, "seq": seq, "speaker": speaker, "text": text}
+    if simulated:
+        payload["simulated"] = True
     turn = Turn(call_id=spec.call_id, seq=seq, speaker=speaker, text=text)
     event = Event(
         task_id=spec.task_id,
         type="transcript",
-        payload_json=json.dumps({"call_id": spec.call_id, "seq": seq, "speaker": speaker, "text": text}, ensure_ascii=False),
+        payload_json=json.dumps(payload, ensure_ascii=False),
         visibility="contact",  # docs/ARCHITECTURE.md: transcripts are visible to both roles; see the D6 open item
     )
     try:

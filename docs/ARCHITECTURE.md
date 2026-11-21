@@ -49,7 +49,7 @@ Deterministic, in this order. Each step writes an event; the task status is the 
 1. `intake` — Nano → `IntakeRequest`. Emit `request`.
 2. `calendar` — `calendar.free_windows()` for the requested range.
 3. `places` — `places.find_clinics()` top 3, then `distance.drive()` from the owner's home. Emit `call_start` ×3 with distance meta.
-4. `calling` — `voice.start_call()` ×3 in parallel. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`.
+4. `calling` — `voice.start_call()` ×3 in parallel. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`. Mock and simulator lines take the same recorder (`llm_proxy.record_turn`, one `turns` row and one `transcript` event per `(call_id, seq)`), labelled `simulated: true`.
 5. `ranking` — `ranking.hard_rules()` drops offers over budget, outside free windows, or not insured. `ranker.rank()` (Super) scores the rest. Emit `decision`. If nothing survives, status `failed` with reason, emit `task_updated`, notify both, stop.
 6. `awaiting_approval` — SMS the owner the pick. Emit `approval_required`. Wait for `POST /api/tasks/{id}/approve` or SMS `YES`. Timeout: one reminder, then stay waiting.
 7. `booking` — `voice.confirm_booking()` (a short call-back, or the mock) returns `Confirmation`. Only on `confirmed`: `calendar.create_event()` once, keyed by task id. Emit `booked`. On `tentative`: emit `booked` with `tentative: true` and no calendar event.
@@ -100,7 +100,7 @@ The prototype `frontend/prototype/index.html` renders the first eight exactly as
 { type: "request", text, chips: [..] }                       // chip starting with "!" renders green
 { type: "call_start", call_id, clinic, meta }                // meta: "1.2 mi · 6 min"
 { type: "call_status", call_id, status: "dialing"|"live"|"hold"|"done" }
-{ type: "transcript", call_id, speaker: "agent"|"clinic", text }
+{ type: "transcript", call_id, seq, speaker: "agent"|"clinic", text }   // seq: 1-based position in the call; mock lines carry simulated: true
 { type: "call_result", call_id, price, slot, insured, slotOk }
 { type: "decision", winner, title, reasons: [..], second: [..], tradeoff }
 { type: "booked", calendar, sms_user, tentative? }
