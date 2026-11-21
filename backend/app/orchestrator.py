@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -27,6 +27,9 @@ from app.nemotron.ranker import timed_rank
 from app.nemotron.types import IntakeRequest, UserRecord
 from app.people import ensure_contacts, load_owner
 from app.ranking import hard_rules, money, no_eligible_offer, slot_label
+from app.routers import (
+    llm_proxy,  # the one transcript recorder, shared with live calls (#87)
+)
 from app.state import transition
 from integrations.types import (
     Booking,
@@ -75,6 +78,8 @@ class Run:
     offers: list[Offer] | None = None
     winner: Offer | None = None
     booking: Booking | None = None
+    proxy_specs: dict = field(default_factory=dict)  # call id -> the recorder's CallSpec, loaded once per call
+    transcript_seq: dict[str, int] = field(default_factory=dict)  # call id -> last seq given to a line that arrived without one
 
 
 class Pipeline:
@@ -229,10 +234,16 @@ class Pipeline:
             raise PipelineFailure("CALL_FAILED", "No clinic call produced an offer.")
 
     def _voice_event(self, run: Run, event: dict) -> None:
-        """A `call_status`, `transcript` or `call_result` payload from the voice adapter: record the fact, then emit."""
+        """A `call_status`, `transcript` or `call_result` payload from the voice adapter: record the fact, then emit.
+
+        Transcript lines do not emit here: they take the live recorder (`_record_transcript`), so a mock call leaves
+        the same Turn rows and transcript events a real call does."""
         event = dict(event)
         type_ = event.pop("type")
         call_id = event.get("call_id")
+        if type_ == "transcript":
+            self._record_transcript(run, event)
+            return
         if type_ == "call_status":
             with session_scope(self.engine) as session:
                 call = session.get(Call, call_id)
@@ -246,6 +257,23 @@ class Pipeline:
                 if call is not None:
                     call.result_json = json.dumps({k: event[k] for k in ("price", "slot", "insured", "slotOk") if k in event})
         self._emit(run, type_, event, "contact")
+
+    def _record_transcript(self, run: Run, line: dict) -> None:
+        """One line of a mock or simulator call goes through `llm_proxy.record_turn`: the Turn row and the `transcript`
+        event are written together, keyed by (call_id, seq), so a replayed or retried line is a no-op (T8, invariant 7).
+
+        `seq` comes from the adapter when it numbers its lines (the simulator does); a line without one gets the next
+        number for its call, which is stable within the run. `simulated` is kept on the event exactly as the adapter
+        sent it, so a judge sees the same label on the transcript as on the call card."""
+        call_id = line["call_id"]
+        seq = line.get("seq")
+        if seq is None:
+            seq = run.transcript_seq.get(call_id, 0) + 1
+        run.transcript_seq[call_id] = max(int(seq), run.transcript_seq.get(call_id, 0))
+        spec = run.proxy_specs.get(call_id)
+        if spec is None:
+            spec = run.proxy_specs[call_id] = llm_proxy.load_spec(self.engine, call_id)
+        llm_proxy.record_turn(self.engine, self.bus, spec, int(seq), line["speaker"], line["text"], simulated=bool(line.get("simulated")))
 
     async def _ranking(self, run: Run) -> None:
         self._set_status(run, "ranking")

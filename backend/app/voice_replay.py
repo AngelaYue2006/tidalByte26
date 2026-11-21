@@ -53,7 +53,10 @@ class FixtureReplay:
         _, script = self._script(spec)
         offer = self.offer_for(spec)
         events = [(s["at_ms"], {"type": "call_status", "call_id": spec.call_id, "status": s["status"], "simulated": True}) for s in script["status_changes"]]
-        events += [(ln["at_ms"], {"type": "transcript", "call_id": spec.call_id, "speaker": ln["speaker"], "text": ln["text"], "simulated": True}) for ln in script["lines"]]
+        events += [
+            (ln["at_ms"], {"type": "transcript", "call_id": spec.call_id, "seq": seq, "speaker": ln["speaker"], "text": ln["text"], "simulated": True})
+            for seq, ln in enumerate(script["lines"], start=1)  # numbered, so the recorder keys a replayed line to the same (call_id, seq)
+        ]
         done_at = script["status_changes"][-1]["at_ms"]
         events.append((done_at - 1, {"type": "call_result", "call_id": spec.call_id, "price": money(offer.price), "slot": slot_label(offer.slot_start),
                                      "insured": offer.insured, "slotOk": fits_windows(offer, spec.windows), "simulated": True}))
