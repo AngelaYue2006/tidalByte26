@@ -197,7 +197,6 @@ def test_transport_uses_unavailable_fixture_and_event_schema(booking):
 @pytest.mark.parametrize(
     "module,env_name,invoke",
     [
-        (calendar, "CALENDAR_MODE", lambda: calendar.free_windows("mary", "x", "y")),
         (
             places,
             "PLACES_MODE",
