@@ -9,6 +9,7 @@ for once more on failure. summarize_call belongs to #21 and is not here yet.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from pathlib import Path
@@ -69,11 +70,15 @@ class NvidiaChatClient:
         return reply.choices[0].message.content or ""
 
 
+def _reject_constant(name: str) -> None:
+    raise BadReply(f"{name} is not a valid JSON number")
+
+
 def parse_json_object(text: str) -> dict:
     """Strict parse: one JSON object, code fences tolerated, nothing else."""
     cleaned = _FENCE.sub("", text.strip()).strip()
     try:
-        data = json.loads(cleaned)
+        data = json.loads(cleaned, parse_constant=_reject_constant)
     except json.JSONDecodeError as exc:
         raise BadReply(f"not valid JSON ({exc.msg} at char {exc.pos})") from exc
     if not isinstance(data, dict):
@@ -82,20 +87,28 @@ def parse_json_object(text: str) -> dict:
 
 
 def _check_model_reply(data: dict, offers: list[OfferLike]) -> None:
+    """Every field Super must get right before its reply is used. Each problem is a BadReply the retry prompt quotes."""
     ids = [o.call_id for o in offers]
     winner = data.get("winner_call_id")
     if winner not in ids:
         raise BadReply(f"winner_call_id {winner!r} is not one of the offers {ids}")
     ranked = data.get("ranked")
-    if not isinstance(ranked, list) or [r.get("call_id") if isinstance(r, dict) else None for r in ranked] == []:
+    if not isinstance(ranked, list) or not ranked:
         raise BadReply("ranked must be a non-empty list")
-    ranked_ids = [r.get("call_id") for r in ranked if isinstance(r, dict)]
+    for i, entry in enumerate(ranked):
+        if not isinstance(entry, dict):
+            raise BadReply(f"ranked[{i}] must be an object with call_id and score, got {entry!r}")
+        if not isinstance(entry.get("call_id"), str):
+            raise BadReply(f"ranked[{i}].call_id must be a string")
+        score = entry.get("score")
+        if isinstance(score, bool) or not isinstance(score, int | float) or not math.isfinite(score):
+            raise BadReply(f"score for {entry['call_id']!r} must be a finite number from 0 to 100")
+        if not 0 <= score <= 100:
+            raise BadReply(f"score for {entry['call_id']!r} is {score}; it must be from 0 to 100")
+    ranked_ids = [entry["call_id"] for entry in ranked]
     if sorted(ranked_ids) != sorted(ids):
         raise BadReply(f"ranked must cover every offer exactly once; got {ranked_ids}, expected {ids}")
-    for r in ranked:
-        if not isinstance(r.get("score"), int | float) or isinstance(r.get("score"), bool):
-            raise BadReply(f"score for {r.get('call_id')!r} is not a number")
-    if ranked[0]["call_id"] != winner:
+    if ranked_ids[0] != winner:
         raise BadReply("ranked[0] must be the winner")
     tradeoff = data.get("tradeoff")
     if not isinstance(tradeoff, str) or not tradeoff.strip():

@@ -126,8 +126,17 @@ def test_bad_json_is_retried_once_with_the_problem_named():
     [
         (json.dumps({"winner_call_id": "z", "ranked": [{"call_id": "a", "score": 1}], "tradeoff": "x"}), "not one of the offers"),
         (json.dumps({"winner_call_id": "a", "ranked": [{"call_id": "a", "score": 1}], "tradeoff": ""}), "tradeoff"),
-        (json.dumps({"winner_call_id": "a", "ranked": [{"call_id": "a", "score": "high"}], "tradeoff": "x"}), "not a number"),
+        (json.dumps({"winner_call_id": "a", "ranked": [{"call_id": "a", "score": "high"}], "tradeoff": "x"}), "finite number"),
         (json.dumps({"winner_call_id": "a", "ranked": [], "tradeoff": "x"}), "non-empty"),
+        ('{"winner_call_id": "a", "ranked": [{"call_id": "a", "score": 90}, null], "tradeoff": "x"}', "ranked[1] must be an object"),
+        (json.dumps({"winner_call_id": "a", "ranked": [{"score": 90}], "tradeoff": "x"}), "call_id must be a string"),
+        (json.dumps({"winner_call_id": "a", "ranked": [{"call_id": 7, "score": 90}], "tradeoff": "x"}), "call_id must be a string"),
+        (json.dumps({"winner_call_id": "a", "ranked": [{"call_id": "a", "score": True}], "tradeoff": "x"}), "finite number"),
+        ('{"winner_call_id": "a", "ranked": [{"call_id": "a", "score": NaN}], "tradeoff": "x"}', "NaN is not a valid JSON number"),
+        ('{"winner_call_id": "a", "ranked": [{"call_id": "a", "score": Infinity}], "tradeoff": "x"}', "Infinity is not a valid JSON number"),
+        (json.dumps({"winner_call_id": "a", "ranked": [{"call_id": "a", "score": 150}], "tradeoff": "x"}), "must be from 0 to 100"),
+        (json.dumps({"winner_call_id": "a", "ranked": [{"call_id": "a", "score": -1}], "tradeoff": "x"}), "must be from 0 to 100"),
+        (json.dumps({"winner_call_id": "a", "ranked": "a", "tradeoff": "x"}), "non-empty list"),
     ],
 )
 def test_semantically_wrong_replies_are_retried(bad, problem):
@@ -135,6 +144,13 @@ def test_semantically_wrong_replies_are_retried(bad, problem):
     rank([BRIGHT], WINDOWS, "cheapest", client=client)
     assert len(client.calls) == 2
     assert problem in client.calls[1]["user"]
+
+
+def test_recovery_after_a_malformed_entry_serialises_cleanly():
+    bad = '{"winner_call_id": "a", "ranked": [{"call_id": "a", "score": NaN}], "tradeoff": "x"}'
+    decision = rank([BRIGHT], WINDOWS, "cheapest", client=ScriptedClient(bad, GOOD))
+    Draft202012Validator(SCHEMA).validate(decision)
+    assert json.loads(json.dumps(decision, allow_nan=False))["score"] == 92.0
 
 
 def test_two_bad_replies_raise_ranking_error_not_a_guess():
