@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import SceneArt from "@/components/SceneArt";
 import type { LiveEvent, TranscriptEvent } from "@/lib/events";
 import type { HistoryTask } from "@/lib/history";
 import { formatTaskDate, toneClass, toListItem } from "@/lib/history";
@@ -11,6 +12,7 @@ type Props = {
   viewerId: string;
   role: "owner" | "contact";
   simulated?: boolean;
+  density?: string | null;
 };
 
 function eventLabel(ev: LiveEvent): string {
@@ -62,10 +64,18 @@ function transcriptsByCall(events: LiveEvent[]): Map<string, TranscriptEvent[]> 
 }
 
 /** Detail: summary, event trail, and (owner) call transcripts. */
-export default function HistoryDetail({ task, events, viewerId, role, simulated }: Props) {
+export default function HistoryDetail({
+  task,
+  events,
+  viewerId,
+  role,
+  simulated,
+  density,
+}: Props) {
   const item = toListItem(task);
   const backQs = new URLSearchParams({ viewer_id: viewerId });
   if (simulated) backQs.set("preview", "1");
+  if (density) backQs.set("density", density);
   const back = `/history?${backQs.toString()}`;
   const transcripts = role === "owner" ? transcriptsByCall(events) : new Map();
 
@@ -75,33 +85,36 @@ export default function HistoryDetail({ task, events, viewerId, role, simulated 
         <Link href={back}>← History</Link>
       </p>
 
-      <div className="card">
-        <div className="history-row-top">
-          <time className="history-date">{formatTaskDate(task.created_at)}</time>
-          <span className={toneClass(item.outcome.tone)}>{item.outcome.label}</span>
+      <div className="card history-detail-hero page-hero-coral">
+        <div>
+          <div className="history-row-top">
+            <time className="history-date">{formatTaskDate(task.created_at)}</time>
+            <span className={toneClass(item.outcome.tone)}>{item.outcome.label}</span>
+          </div>
+          {role === "owner" && task.request_text ? (
+            <p className="history-request">{task.request_text}</p>
+          ) : null}
+          <div className="chips history-chips">
+            {item.chips
+              .filter((c) => !c.startsWith("!"))
+              .map((c) => (
+                <span key={c} className="chip">
+                  {c}
+                </span>
+              ))}
+          </div>
+          <div className="history-row-meta">
+            <span>
+              <strong>{item.pick}</strong>
+              <span className="faint"> · {item.price}</span>
+            </span>
+            <span className={toneClass(item.ride.tone)}>{item.ride.label}</span>
+          </div>
+          {simulated ? (
+            <p className="faint history-sim-note">Simulated seeded run</p>
+          ) : null}
         </div>
-        {role === "owner" && task.request_text ? (
-          <p className="history-request">{task.request_text}</p>
-        ) : null}
-        <div className="chips history-chips">
-          {item.chips
-            .filter((c) => !c.startsWith("!"))
-            .map((c) => (
-              <span key={c} className="chip">
-                {c}
-              </span>
-            ))}
-        </div>
-        <div className="history-row-meta">
-          <span>
-            <strong>{item.pick}</strong>
-            <span className="faint"> · {item.price}</span>
-          </span>
-          <span className={toneClass(item.ride.tone)}>{item.ride.label}</span>
-        </div>
-        {simulated ? (
-          <p className="faint history-sim-note">Simulated seeded run</p>
-        ) : null}
+        <SceneArt name="care" className="scene-art scene-art-sm" />
       </div>
 
       <section className="card">

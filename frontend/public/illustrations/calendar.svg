@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240" fill="none" role="img" aria-label="Calendar illustration">
+  <defs>
+    <linearGradient id="calBg" x1="1" y1="0" x2="0" y2="1">
+      <stop stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#6EE7B7"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="240" rx="32" fill="url(#calBg)"/>
+  <circle cx="48" cy="48" r="26" fill="#FB7185" opacity="0.7"/>
+  <circle cx="286" cy="200" r="40" fill="#38BDF8" opacity="0.45"/>
+  <rect x="70" y="48" width="180" height="152" rx="20" fill="#FFF"/>
+  <rect x="70" y="48" width="180" height="44" rx="20" fill="#EA580C"/>
+  <rect x="70" y="72" width="180" height="20" fill="#EA580C"/>
+  <circle cx="108" cy="62" r="7" fill="#FFF7ED"/>
+  <circle cx="212" cy="62" r="7" fill="#FFF7ED"/>
+  <rect x="92" y="108" width="28" height="28" rx="8" fill="#A7F3D0"/>
+  <rect x="132" y="108" width="28" height="28" rx="8" fill="#FDE68A"/>
+  <rect x="172" y="108" width="28" height="28" rx="8" fill="#FDA4AF"/>
+  <rect x="212" y="108" width="28" height="28" rx="8" fill="#BAE6FD"/>
+  <rect x="92" y="148" width="28" height="28" rx="8" fill="#67E8F9"/>
+  <rect x="132" y="148" width="28" height="28" rx="8" fill="#0D9488"/>
+  <rect x="172" y="148" width="28" height="28" rx="8" fill="#FED7AA"/>
+  <rect x="212" y="148" width="28" height="28" rx="8" fill="#E2E8F0"/>
+</svg>

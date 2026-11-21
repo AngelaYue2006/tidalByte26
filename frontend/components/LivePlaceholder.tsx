@@ -9,6 +9,7 @@ import Confirmations from "@/components/Confirmations";
 import ContactReply from "@/components/ContactReply";
 import DecisionCard from "@/components/DecisionCard";
 import RequestBar from "@/components/RequestBar";
+import SceneArt from "@/components/SceneArt";
 import TransportCard from "@/components/TransportCard";
 import { foldEvents, type DashboardState } from "@/lib/dashboard";
 import { densityFromSearchParams } from "@/lib/density";
@@ -129,6 +130,19 @@ export default function LivePlaceholder() {
 
   return (
     <main className={simple ? "live-main density-simple" : "live-main density-detailed"} key={density}>
+      <header className="page-hero card page-hero-live">
+        <div className="page-hero-copy">
+          <p className="page-kicker">In progress</p>
+          <h1>Live</h1>
+          <p className="muted">
+            {viewer.role === "owner"
+              ? "Speak a request — LifeLine calls clinics, picks a slot, and waits for your OK."
+              : "Watch Mary’s booking trail. Reply when a ride is needed."}
+          </p>
+        </div>
+        <SceneArt name="phone" className="scene-art page-hero-art" />
+      </header>
+
       <section className="live-section live-section-request">
         <RequestBar viewer={viewer} chips={chips} requestText={requestText} />
       </section>

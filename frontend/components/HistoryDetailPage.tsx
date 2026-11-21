@@ -16,35 +16,47 @@ import { viewerFromSearchParams } from "@/lib/viewer";
 
 type Props = { taskId: string };
 
-/** Loads one task + events; seeded fixtures when preview or API empty. */
+function seedFor(taskId: string, role: "owner" | "contact"): HistoryTask | null {
+  const seed = SEEDED_TASKS.find((t) => t.id === taskId);
+  return seed ? projectTaskForViewer(seed, role) : null;
+}
+
+/** Loads one task + events; seeded fixtures when preview, API empty, or seed id. */
 export default function HistoryDetailPage({ taskId }: Props) {
-  const viewer = viewerFromSearchParams(useSearchParams());
-  const preview = useSearchParams().get("preview") === "1";
-  const [task, setTask] = useState<HistoryTask | null>(null);
-  const [events, setEvents] = useState<LiveEvent[]>([]);
-  const [simulated, setSimulated] = useState(false);
-  const [missing, setMissing] = useState(false);
+  const searchParams = useSearchParams();
+  const viewer = viewerFromSearchParams(searchParams);
+  const preview = searchParams.get("preview") === "1";
+  const density = searchParams.get("density");
+
+  const initial = seedFor(taskId, viewer.role);
+  const [task, setTask] = useState<HistoryTask | null>(initial);
+  const [events, setEvents] = useState<LiveEvent[]>(() =>
+    initial ? (SEEDED_EVENTS[taskId] ?? []) : [],
+  );
+  const [simulated, setSimulated] = useState(Boolean(initial));
+  const [missing, setMissing] = useState(!initial && preview);
 
   useEffect(() => {
     let cancelled = false;
 
-    function applySeed() {
-      const seed = SEEDED_TASKS.find((t) => t.id === taskId);
-      if (!seed) {
+    function applySeed(): boolean {
+      const seeded = seedFor(taskId, viewer.role);
+      if (!seeded) {
         setMissing(true);
-        return;
+        setTask(null);
+        return false;
       }
-      setTask(projectTaskForViewer(seed, viewer.role));
+      setTask(seeded);
       setEvents(SEEDED_EVENTS[taskId] ?? []);
       setSimulated(true);
       setMissing(false);
+      return true;
     }
 
     async function load() {
-      if (preview) {
-        if (!cancelled) applySeed();
-        return;
-      }
+      // Always paint seed first when we have one so detail never flashes empty.
+      applySeed();
+      if (preview) return;
 
       try {
         const [taskRaw, eventsRaw] = await Promise.all([
@@ -98,6 +110,7 @@ export default function HistoryDetailPage({ taskId }: Props) {
         viewerId={viewer.viewerId}
         role={viewer.role}
         simulated={simulated}
+        density={density}
       />
     </main>
   );

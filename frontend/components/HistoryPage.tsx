@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import HistoryList from "@/components/HistoryList";
+import SceneArt from "@/components/SceneArt";
 import { getTasks } from "@/lib/api";
 import {
   parseTasksPayload,
@@ -14,22 +15,32 @@ import {
 import { SEEDED_TASKS } from "@/lib/history_fixtures";
 import { viewerFromSearchParams } from "@/lib/viewer";
 
-/** Loads GET /api/tasks; falls back to two seeded runs when preview or API unavailable. */
+function seedTasks(role: "owner" | "contact"): HistoryTask[] {
+  return sortNewestFirst(SEEDED_TASKS.map((t) => projectTaskForViewer(t, role)));
+}
+
+/** Loads GET /api/tasks; always shows seeded runs when API is empty or down. */
 export default function HistoryPage() {
-  const viewer = viewerFromSearchParams(useSearchParams());
-  const preview = useSearchParams().get("preview") === "1";
-  const [tasks, setTasks] = useState<HistoryTask[] | null>(null);
-  const [simulated, setSimulated] = useState(false);
+  const searchParams = useSearchParams();
+  const viewer = viewerFromSearchParams(searchParams);
+  const preview = searchParams.get("preview");
+  const density = searchParams.get("density");
+  const forcePreview = preview === "1";
+
+  // Paint seeds immediately so /history never looks broken while fetch runs.
+  const [tasks, setTasks] = useState<HistoryTask[]>(() => seedTasks(viewer.role));
+  const [simulated, setSimulated] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setTasks(seedTasks(viewer.role));
+    setSimulated(true);
 
     async function load() {
-      if (preview) {
+      if (forcePreview) {
         if (!cancelled) {
-          setTasks(sortNewestFirst(SEEDED_TASKS.map((t) => projectTaskForViewer(t, viewer.role))));
-          setSimulated(true);
+          setError(null);
         }
         return;
       }
@@ -39,19 +50,19 @@ export default function HistoryPage() {
         const parsed = sortNewestFirst(parseTasksPayload(raw)).map((t) =>
           projectTaskForViewer(t, viewer.role),
         );
-        if (!cancelled) {
-          if (parsed.length === 0) {
-            // Backend stub or empty DB — show seeded runs so the page is demoable.
-            setTasks(sortNewestFirst(SEEDED_TASKS.map((t) => projectTaskForViewer(t, viewer.role))));
-            setSimulated(true);
-          } else {
-            setTasks(parsed);
-            setSimulated(false);
-          }
+        if (cancelled) return;
+        if (parsed.length === 0) {
+          setTasks(seedTasks(viewer.role));
+          setSimulated(true);
+          setError(null);
+        } else {
+          setTasks(parsed);
+          setSimulated(false);
+          setError(null);
         }
       } catch (err) {
         if (!cancelled) {
-          setTasks(sortNewestFirst(SEEDED_TASKS.map((t) => projectTaskForViewer(t, viewer.role))));
+          setTasks(seedTasks(viewer.role));
           setSimulated(true);
           setError(err instanceof Error ? err.message : "tasks unavailable");
         }
@@ -62,27 +73,29 @@ export default function HistoryPage() {
     return () => {
       cancelled = true;
     };
-  }, [viewer.viewerId, viewer.role, preview]);
-
-  if (tasks === null) {
-    return (
-      <main>
-        <p className="muted">Loading history…</p>
-      </main>
-    );
-  }
+  }, [viewer.viewerId, viewer.role, forcePreview]);
 
   return (
-    <main>
-      <h1 className="history-title">History</h1>
-      <p className="muted history-sub">Past runs for {viewer.name}</p>
-      {error && simulated ? (
-        <p className="faint history-api-note">API unreachable — using seeded runs ({error})</p>
-      ) : null}
+    <main className="history-page">
+      <header className="page-hero card page-hero-coral">
+        <div className="page-hero-copy">
+          <p className="page-kicker">Past runs</p>
+          <h1 className="history-title">History</h1>
+          <p className="muted history-sub">
+            Everything LifeLine booked for {viewer.name} — tap a run for the full trail.
+          </p>
+          {error && simulated ? (
+            <p className="faint history-api-note">API unreachable — showing demo runs ({error})</p>
+          ) : null}
+        </div>
+        <SceneArt name="family" className="scene-art page-hero-art" />
+      </header>
       <HistoryList
         items={tasks.map(toListItem)}
         viewerId={viewer.viewerId}
         simulated={simulated}
+        preview={preview}
+        density={density}
       />
     </main>
   );

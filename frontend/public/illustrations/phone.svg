@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240" fill="none" role="img" aria-label="Phone call illustration">
+  <defs>
+    <linearGradient id="phoneBg" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#67E8F9"/>
+      <stop offset="1" stop-color="#FDBA74"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="240" rx="32" fill="url(#phoneBg)"/>
+  <circle cx="56" cy="52" r="28" fill="#FDE68A"/>
+  <circle cx="280" cy="190" r="48" fill="#F9A8D4" opacity="0.45"/>
+  <rect x="118" y="36" width="84" height="168" rx="22" fill="#134E4A"/>
+  <rect x="128" y="52" width="64" height="120" rx="8" fill="#ECFEFF"/>
+  <circle cx="160" cy="186" r="8" fill="#67E8F9"/>
+  <path d="M148 96c8-10 24-10 32 0" stroke="#0D9488" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="152" cy="112" r="6" fill="#F97316"/>
+  <circle cx="168" cy="112" r="6" fill="#F97316"/>
+  <path d="M146 128h28" stroke="#64748B" stroke-width="4" stroke-linecap="round"/>
+  <path d="M70 120c-18 12-18 36 0 48" stroke="#FFF" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  <path d="M54 108c-28 20-28 56 0 76" stroke="#FFF" stroke-width="6" stroke-linecap="round" opacity="0.55"/>
+  <path d="M250 120c18 12 18 36 0 48" stroke="#FFF" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  <path d="M266 108c28 20 28 56 0 76" stroke="#FFF" stroke-width="6" stroke-linecap="round" opacity="0.55"/>
+</svg>
