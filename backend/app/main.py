@@ -13,6 +13,7 @@ from app.adapters import Deps, build_deps
 from app.config import Settings, load_settings
 from app.db import init_db, make_engine
 from app.events import EventBus
+from app.nemotron import local_intake
 from app.orchestrator import Pipeline
 from app.routers import approvals, contacts, demo, live, requests, tasks
 
@@ -26,8 +27,10 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     engine = make_engine(settings.database_url)
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         init_db(engine)
+        # Load Nano now, off the event loop, so the first intake is the 2 s one and not the 10 s one (#77).
+        app.state.warm_up_thread = local_intake.warm_up_in_background(settings.ollama_base_url, settings.nemotron_nano_tag)
         yield
         engine.dispose()
 
