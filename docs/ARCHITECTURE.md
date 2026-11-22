@@ -47,6 +47,9 @@ Exact model IDs go in `.env` (`NEMOTRON_NANO_TAG`, `NEMOTRON_LIGHTNING_ID`, `NEM
 Deterministic, in this order. Each step writes an event; the task status is the step name.
 
 1. `intake` — Nano → `IntakeRequest`. Emit `request`.
+
+   The dashboard may ask for missing budget / ride preferences in the browser and fold the answers into the utterance before `POST /api/requests`. That completes the request (D5); it does not create a task or propose clinic options. Requests that already include both preferences skip the UI. A labelled `?workspace=demo` path can run the same questions as a browser-only simulation. Any backend preference API stays on issue #86.
+
 2. `calendar` — `calendar.free_windows()` for the requested range.
 3. `places` — `places.find_clinics()` top 3, then `distance.drive()` from the owner's home. Emit `call_start` ×3 with distance meta.
 4. `calling` — `voice.start_call()` ×3 in parallel. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`. Mock and simulator lines take the same recorder (`llm_proxy.record_turn`, one `turns` row and one `transcript` event per `(call_id, seq)`), labelled `simulated: true`.

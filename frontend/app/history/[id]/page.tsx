@@ -1,4 +1,4 @@
-// History detail: event trail and (owner) call transcripts.
+// History detail for recorded requests and the local simulated session.
 import { Suspense } from "react";
 import HistoryDetailPage from "@/components/HistoryDetailPage";
 
