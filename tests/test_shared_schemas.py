@@ -71,7 +71,7 @@ EXAMPLE_EVENTS = {
     "request": {"type": "request", "text": "I need a dental cleaning this week, under $150.", "chips": OWNER_TASK["chips"]},
     "call_start": {"type": "call_start", "call_id": "a", "clinic": "Bright Smile Dental", "meta": "1.2 mi · 6 min"},
     "call_status": {"type": "call_status", "call_id": "a", "status": "live"},
-    "transcript": {"type": "transcript", "call_id": "a", "speaker": "agent",
+    "transcript": {"type": "transcript", "call_id": "a", "seq": 1, "speaker": "agent",
                    "text": "Hi, I'm an AI assistant calling for a patient. Do you take Delta Dental?"},
     "call_result": {"type": "call_result", "call_id": "a", "price": "$95", "slot": "Thu 9:30", "insured": True, "slotOk": True},
     "decision": {"type": "decision", "winner": "a", "title": "Why Nemotron picked Bright Smile Dental",
