@@ -64,12 +64,12 @@ export default function DecisionCard({
       {!compact ? (
         <>
           <div className="chips" aria-label="Reasons">
-            {decision.reasons.map((r) => (
+            {(decision.reasons ?? []).map((r) => (
               <span key={r} className="chip chip-accent">
                 {r}
               </span>
             ))}
-            {decision.second.map((r) => (
+            {(decision.second ?? []).map((r) => (
               <span key={r} className="chip">
                 {r}
               </span>

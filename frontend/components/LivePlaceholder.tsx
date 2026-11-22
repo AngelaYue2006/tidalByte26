@@ -107,9 +107,19 @@ function LiveDashboard() {
   }, [viewer.viewerId, preview, previewAwaiting]);
 
   const rawState = useMemo(() => {
-    if (liveState && (liveState.calls.length > 0 || liveState.transport || liveState.decision)) {
-      return liveState;
-    }
+    // Prefer any real stream state (including request-only / taskId) over the fixture preview.
+    const hasLive =
+      !!liveState &&
+      (!!liveState.taskId ||
+        !!liveState.request ||
+        liveState.calls.length > 0 ||
+        !!liveState.transport ||
+        !!liveState.decision ||
+        !!liveState.approval ||
+        !!liveState.confirmations ||
+        !!liveState.failure ||
+        liveState.taskStatus === "failed");
+    if (hasLive) return liveState!;
     if (previewAwaiting) return AWAITING_STATE;
     if (preview) return PREVIEW_STATE;
     return liveState ?? { calls: [] };
@@ -154,6 +164,18 @@ function LiveDashboard() {
       <section className="live-section live-section-request">
         <RequestBar viewer={viewer} chips={chips} requestText={requestText} />
       </section>
+
+      {state.taskStatus === "failed" ? (
+        <div className="card status-card" role="alert">
+          <p className="bad status-card-text">
+            {state.failure?.message ??
+              "Nothing was booked."}
+          </p>
+          {state.failure?.reason ? (
+            <p className="faint status-card-text">{state.failure.reason}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <section className="live-section live-section-calls">
         {viewer.role === "owner" && calls.length > 0 ? (

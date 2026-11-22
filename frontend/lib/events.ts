@@ -7,35 +7,42 @@ export type CallStatus = "dialing" | "live" | "hold" | "done";
 export type TranscriptSpeaker = "agent" | "clinic";
 export type TransportStatus = "checking" | "unavailable" | "available";
 
+/** Fields the backend's project_event adds on every persisted event. */
+export type EventMeta = {
+  visibility?: EventVisibility;
+  task_id?: string;
+  id?: number | string;
+  at?: string;
+  simulated?: boolean;
+};
+
 export type RequestEvent = {
   type: "request";
   text?: string;
   chips: string[];
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type CallStartEvent = {
   type: "call_start";
   call_id: string;
   clinic: string;
   meta?: string;
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type CallStatusEvent = {
   type: "call_status";
   call_id: string;
   status: CallStatus;
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type TranscriptEvent = {
   type: "transcript";
   call_id: string;
+  /** 1-based position in the call (live recorder / mock path). */
+  seq?: number;
   speaker: TranscriptSpeaker;
   text: string;
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type CallResultEvent = {
   type: "call_result";
@@ -44,8 +51,7 @@ export type CallResultEvent = {
   slot: string;
   insured: boolean;
   slotOk: boolean;
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type DecisionEvent = {
   type: "decision";
@@ -54,73 +60,66 @@ export type DecisionEvent = {
   reasons: string[];
   second: string[];
   tradeoff: string;
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type BookedEvent = {
   type: "booked";
   calendar: string;
   sms_user: string;
   tentative?: boolean;
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type NotifiedEvent = {
   type: "notified";
   sms_contact: string;
   sms_user?: string;
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type ApprovalRequiredEvent = {
   type: "approval_required";
   pick: { clinic: string; slot: string; price: string };
   expires_at?: string;
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type ApprovedEvent = {
   type: "approved";
   by: string;
   via: "dashboard" | "sms";
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type TransportCheckEvent = {
   type: "transport_check";
   status: TransportStatus;
   reason?: string;
   simulated: true;
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type ContactRequestEvent = {
   type: "contact_request";
   contact: string;
   message: string;
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type ContactReplyEvent = {
   type: "contact_reply";
   contact: string;
   text: string;
   offer?: { can_drive?: boolean; pickup_time?: string };
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type RideConfirmedEvent = {
   type: "ride_confirmed";
   driver: string;
   pickup_time: string;
-  visibility?: EventVisibility;
-};
+} & EventMeta;
 
 export type TaskUpdatedEvent = {
   type: "task_updated";
   status: string;
-  visibility?: EventVisibility;
-};
+  /** Present on failed runs (NO_ELIGIBLE_OFFER, RANKING_FAILED, …). */
+  reason?: string;
+  message?: string;
+} & EventMeta;
 
 export type SnapshotEvent = {
   type: "snapshot";
@@ -161,4 +160,11 @@ export function isLiveEvent(value: unknown): value is LiveEvent {
     "type" in value &&
     typeof (value as { type: unknown }).type === "string"
   );
+}
+
+/** task_id from a streamed or snapshot event, when present. */
+export function eventTaskId(event: LiveEvent): string | undefined {
+  if (event.type === "snapshot" || event.type === "heartbeat") return undefined;
+  const id = (event as EventMeta).task_id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
 }
