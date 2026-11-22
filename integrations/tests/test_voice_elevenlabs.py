@@ -172,11 +172,14 @@ def test_live_booking_fails_before_any_outbound_request(call):
         voice.confirm_booking(call, "Thu 9:30")
 
 
-def test_mock_and_unknown_modes_cannot_make_vendor_requests(monkeypatch, call):
-    for mode in ["mock", "typo"]:
-        monkeypatch.setenv("VOICE_MODE", mode)
-        with pytest.raises(RuntimeError, match="VOICE_MODE"):
-            voice.start_call(call)
+@pytest.mark.parametrize(("mode", "message"), [
+    ("mock", "Bind backend callbacks"),
+    ("typo", "VOICE_MODE"),
+])
+def test_mock_and_unknown_modes_cannot_make_vendor_requests(monkeypatch, call, mode, message):
+    monkeypatch.setenv("VOICE_MODE", mode)
+    with pytest.raises(RuntimeError, match=message):
+        voice.start_call(call)
 
 
 def test_allowlist_is_rechecked_after_preflight(monkeypatch, call):

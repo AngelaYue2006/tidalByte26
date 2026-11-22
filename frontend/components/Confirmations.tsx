@@ -7,10 +7,11 @@ export type ConfirmationsProps = {
   confirmations?: DashboardState["confirmations"];
   /** True once booked (or preview) so the three cards appear. */
   show?: boolean;
+  contactView?: boolean;
 };
 
 /** Three cards: text to owner, Google Calendar, text to contact. */
-export default function Confirmations({ confirmations, show = false }: ConfirmationsProps) {
+export default function Confirmations({ confirmations, show = false, contactView = false }: ConfirmationsProps) {
   const booked = confirmations?.booked;
   const notified = confirmations?.notified;
   if (!show && !booked && !notified) return null;
@@ -24,7 +25,7 @@ export default function Confirmations({ confirmations, show = false }: Confirmat
 
   return (
     <section className="confirms" aria-label="Confirmations">
-      <article className="confirm-card">
+      {!contactView && <article className="confirm-card">
         <h2>
           <IconMessage size={18} stroke={1.75} aria-hidden />
           Text to Mary
@@ -32,15 +33,15 @@ export default function Confirmations({ confirmations, show = false }: Confirmat
         <div className={sendingUser ? "muted pulse" : undefined}>
           {smsUser ?? "Sending…"}
         </div>
-      </article>
+      </article>}
 
       <article className="confirm-card">
         <h2>
           <IconCalendar size={18} stroke={1.75} aria-hidden />
-          Google Calendar
+          Mary’s calendar
         </h2>
         {calendar ? (
-          <div dangerouslySetInnerHTML={{ __html: calendar }} />
+          <div>{calendar.replace(/<[^>]+>/g, " ")}</div>
         ) : (
           <div className={sendingCal ? "muted pulse" : "muted"}>Sending…</div>
         )}

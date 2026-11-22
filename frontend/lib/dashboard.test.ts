@@ -67,4 +67,89 @@ describe("reduceDashboard with prototype SCENARIO", () => {
   it("starts from emptyDashboard", () => {
     expect(emptyDashboard()).toEqual({ calls: [] });
   });
+
+  it("picks up task_id from streamed events so Approve works before a reconnect", () => {
+    const state = foldEvents([
+      {
+        type: "task_updated",
+        status: "intake",
+        task_id: "task-live-1",
+        id: 1,
+      },
+      {
+        type: "request",
+        text: "dental cleaning",
+        chips: ["Dental cleaning"],
+        task_id: "task-live-1",
+        id: 2,
+      },
+      {
+        type: "decision",
+        winner: "task-live-1-a",
+        title: "Why Nemotron picked Bright Smile Dental",
+        reasons: ["Cheapest"],
+        second: ["2nd closest"],
+        tradeoff: "trade",
+        task_id: "task-live-1",
+        id: 3,
+      },
+      {
+        type: "approval_required",
+        pick: { clinic: "Bright Smile Dental", slot: "Thu 9:30", price: "$95" },
+        task_id: "task-live-1",
+        id: 4,
+      },
+    ]);
+    expect(state.taskId).toBe("task-live-1");
+    expect(state.request?.chips).toEqual(["Dental cleaning"]);
+    expect(state.decision?.second).toEqual(["2nd closest"]);
+    expect(state.approval?.pick.clinic).toBe("Bright Smile Dental");
+  });
+
+  it("keeps failure reason and message from task_updated", () => {
+    const state = foldEvents([
+      {
+        type: "task_updated",
+        status: "failed",
+        reason: "RANKING_FAILED",
+        message: "Ranking did not produce a decision.",
+        task_id: "t-fail",
+      },
+    ]);
+    expect(state.taskStatus).toBe("failed");
+    expect(state.failure).toEqual({
+      reason: "RANKING_FAILED",
+      message: "Ranking did not produce a decision.",
+    });
+    expect(state.taskId).toBe("t-fail");
+  });
+
+  it("tolerates a decision event missing second", () => {
+    const state = foldEvents([
+      {
+        type: "decision",
+        winner: "a",
+        title: "Why Nemotron picked X",
+        reasons: ["Fits"],
+        // @ts-expect-error intentional incomplete live payload
+        second: undefined,
+        tradeoff: "trade",
+        task_id: "t1",
+      },
+    ]);
+    expect(state.decision?.second).toEqual([]);
+    expect(state.taskId).toBe("t1");
+  });
+});
+
+it("keeps call graph nodes in event order across interleaved calls and follow-up turns", () => {
+  const state = foldEvents([
+    { type: "call_start", call_id: "a", clinic: "Clinic A" },
+    { type: "call_start", call_id: "b", clinic: "Clinic B" },
+    { type: "transcript", call_id: "b", speaker: "agent", text: "Any openings?" },
+    { type: "call_result", call_id: "a", slot: "Thursday", price: "$95", insured: true, slotOk: true },
+    { type: "transcript", call_id: "a", speaker: "clinic", text: "Please call back to confirm." },
+  ]);
+  expect(state.calls[0].graph?.map(node => node.label)).toEqual(["Clinic call", "Offer received", "Clinic replied"]);
+  expect(state.calls[1].graph?.map(node => node.text)).toEqual(["Clinic B", "Any openings?"]);
 });

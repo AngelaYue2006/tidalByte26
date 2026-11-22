@@ -26,6 +26,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import Engine
 from sqlalchemy.exc import IntegrityError
+from sqlmodel import select
 
 from app import metrics
 from app.config import MissingSetting, Settings
@@ -144,6 +145,40 @@ def record_turn(engine: Engine, bus: EventBus, spec: CallSpec, seq: int, speaker
     return turn
 
 
+def recorded_turn(engine: Engine, call_id: str, seq: int) -> Turn | None:
+    """The turn already written for this position of the call, or None when the position is new."""
+    with session_scope(engine) as session:
+        turn = session.exec(select(Turn).where(Turn.call_id == call_id, Turn.seq == seq)).first()
+        if turn is not None:
+            session.expunge(turn)
+        return turn
+
+
+def replay_response(text: str, call_id: str, seq: int, *, stream: bool):
+    """The recorded line in the OpenAI shape ElevenLabs asked for: one content chunk then a stop chunk and [DONE], or
+    the chat.completion object. No upstream call, no metrics row: nothing was generated."""
+    created = int(time.time())
+    completion_id = f"chatcmpl-replay-{call_id}-{seq}"
+    if not stream:
+        return JSONResponse(
+            {
+                "id": completion_id,
+                "object": "chat.completion",
+                "created": created,
+                "model": "lifeline-replay",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+            }
+        )
+    chunks = [
+        {"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": "lifeline-replay",
+         "choices": [{"index": 0, "delta": {"role": "assistant", "content": text}, "finish_reason": None}]},
+        {"id": completion_id, "object": "chat.completion.chunk", "created": created, "model": "lifeline-replay",
+         "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+    ]
+    payload = "".join(f"data: {json.dumps(c, ensure_ascii=False)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+    return StreamingResponse(iter([payload.encode()]), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
 def _owner_id(engine: Engine, task_id: str) -> str:
     with session_scope(engine) as session:
         task = session.get(Task, task_id)
@@ -193,6 +228,12 @@ async def chat_completions(request: Request):
     turns, clinic_seq, agent_seq = conversation_turns(incoming)
     if clinic_seq is not None:
         record_turn(engine, bus, spec, clinic_seq, "clinic", (turns[-1].get("content") or "").strip())
+    recorded = recorded_turn(engine, call_id, agent_seq)
+    if recorded is not None:
+        # ElevenLabs re-sent a conversation whose agent position is settled (a retry, or a re-ask after the receptionist
+        # spoke over the agent). Speak what the record says, so speech and transcript agree, and never pay Lightning twice (#90).
+        log.info("replaying recorded turn %s of call %s; Lightning not called", agent_seq, call_id)
+        return replay_response(recorded.text, call_id, agent_seq, stream=bool(body.get("stream", True)))
     messages = build_messages(spec, incoming)  # elevenlabs_extra_body and the vendor system prompt never go upstream
     client = lightning_client(request)
 

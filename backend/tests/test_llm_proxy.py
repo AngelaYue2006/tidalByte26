@@ -1,6 +1,7 @@
 """Issue #20: the custom-LLM proxy checks the secret, finds the call, builds the redacted prompt, relays Lightning's stream and logs turns."""
 
 import json
+import logging
 from datetime import UTC, datetime
 
 import pytest
@@ -216,16 +217,39 @@ def test_each_turn_is_one_transcript_event_both_roles_can_see(client, app):
                 validator.validate({k: v for k, v in e.items() if k != "id"})
 
 
-def test_retry_with_different_model_wording_keeps_one_turn_and_one_event(client, app):
+def test_retry_replays_the_recorded_turn_without_calling_lightning(client, app, caplog):
+    """#90: ElevenLabs re-sends the same conversation (a retry, or a re-ask after the receptionist spoke over the agent).
+    The proxy speaks the recorded line, writes nothing new and never reaches Lightning, so speech and transcript agree."""
     client.post("/v1/chat/completions", json=body())
-    app.state.lightning_client.pieces = ["Sure, ", "do you take Delta?"]  # Lightning words the retry differently
-    client.post("/v1/chat/completions", json=body())  # ElevenLabs retry with the same history
+    app.state.lightning_client.pieces = ["Sure, ", "do you take Delta?"]  # Lightning would word a retry differently
+    with caplog.at_level(logging.INFO, logger="lifeline.llm_proxy"):
+        r = client.post("/v1/chat/completions", json=body())  # ElevenLabs retry with the same history
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    lines = [ln for ln in r.text.split("\n") if ln.startswith("data: ")]
+    assert lines[-1] == "data: [DONE]"
+    deltas = [json.loads(ln[6:])["choices"][0]["delta"].get("content", "") for ln in lines[:-1]]
+    assert "".join(deltas) == "Yes. Do you take Delta Dental?", "the recorded line, not Lightning's new wording"
+    assert json.loads(lines[-2][6:])["choices"][0]["finish_reason"] == "stop"
+    assert len(app.state.lightning_client.requests) == 1, "Lightning answered once; the retry was a replay"
+    assert "replaying recorded turn 3" in caplog.text
     assert turns(app) == [
         (2, "clinic", "Yes, we do. A cleaning is $95 with Delta."),
         (3, "agent", "Yes. Do you take Delta Dental?"),
     ]
     with session_scope(app.state.engine) as s:
         assert len(s.exec(select(Event).where(Event.type == "transcript")).all()) == 2
+
+
+def test_non_streaming_retry_replays_the_recorded_turn(client, app, metrics_file):
+    client.post("/v1/chat/completions", json=body(stream=False))
+    app.state.lightning_client.pieces = ["Something else."]
+    r = client.post("/v1/chat/completions", json=body(stream=False))
+    assert r.status_code == 200
+    assert r.json()["object"] == "chat.completion" and r.json()["choices"][0]["message"] == {"role": "assistant", "content": "Yes. Do you take Delta Dental?"}
+    assert r.json()["choices"][0]["finish_reason"] == "stop"
+    assert len(app.state.lightning_client.requests) == 1
+    assert len(turns(app)) == 2
+    assert metrics_file.read_text().count('"call_agent"') == 1, "no first-token row for a replay: nothing was generated"
 
 
 def test_a_genuine_repeated_line_later_in_the_call_is_kept(client, app):
@@ -389,6 +413,18 @@ def test_prompt_discloses_ai_and_never_books():
     spec = CallSpec(call_id="c", task_id="t", clinic_name="Oak Dental", care_type="dental cleaning", windows=[(datetime(2026, 11, 26, 8, tzinfo=UTC), datetime(2026, 11, 26, 12, tzinfo=UTC))])
     prompt = call_agent(spec)
     assert prompt.count(OPENING_LINE) == 1
+    # #90: the first message is spoken by the agent's configured greeting before the proxy is ever asked; on the first
+    # live call the prompt's "first words, exactly" made Lightning repeat the greeting on every turn.
+    assert "already opened with your first message" in prompt and "Never say it again" in prompt
+    assert "Your next line is question 1" in prompt and "in one sentence" in prompt
+    assert "Never repeat a sentence you already said" in prompt
+    assert "first words" not in prompt.lower()
+    # #94: on the second live call the agent asked the receptionist what the patient would consider when the offered
+    # slot fell outside the windows, so the call ended with no slot. The agent collects facts; the patient decides later.
+    assert "say it does not fit and ask for the earliest time inside the windows" in prompt
+    assert "take their earliest time and say the patient will be asked" in prompt
+    assert "Never ask the receptionist what the patient would consider" in prompt
+    assert "ask for the earliest they have and note it" not in prompt
     assert "You are an AI" in prompt
     assert "Never book" in prompt
     assert "no insurance to mention" in prompt

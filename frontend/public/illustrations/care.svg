@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240" fill="none" role="img" aria-label="Care illustration">
+  <defs>
+    <linearGradient id="careSky" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#7DD3FC"/>
+      <stop offset="1" stop-color="#A7F3D0"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="240" rx="32" fill="url(#careSky)"/>
+  <circle cx="268" cy="48" r="42" fill="#FCD34D" opacity="0.9"/>
+  <circle cx="40" cy="200" r="56" fill="#F472B6" opacity="0.35"/>
+  <ellipse cx="160" cy="198" rx="110" ry="18" fill="#0F766E" opacity="0.15"/>
+  <rect x="118" y="96" width="84" height="78" rx="18" fill="#FFF7ED"/>
+  <circle cx="160" cy="78" r="32" fill="#FED7AA"/>
+  <circle cx="149" cy="74" r="3.5" fill="#134E4A"/>
+  <circle cx="171" cy="74" r="3.5" fill="#134E4A"/>
+  <path d="M150 88c6 8 18 8 24 0" stroke="#EA580C" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M118 130h84" stroke="#FDBA74" stroke-width="4"/>
+  <rect x="210" y="128" width="64" height="52" rx="14" fill="#0D9488"/>
+  <path d="M226 154h32M242 138v32" stroke="#ECFDF5" stroke-width="7" stroke-linecap="round"/>
+  <path d="M72 70c18-28 48-28 66 0" stroke="#F97316" stroke-width="8" stroke-linecap="round" opacity="0.7"/>
+  <circle cx="72" cy="70" r="10" fill="#FB7185"/>
+  <circle cx="138" cy="70" r="10" fill="#FB7185"/>
+</svg>

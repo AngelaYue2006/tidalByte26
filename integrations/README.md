@@ -183,11 +183,10 @@ and no redirects/retries. A changed/incomplete API configuration fails closed.
 Webhook destination/secret correctness still requires the actual signed round
 trip; settings presence alone is not that proof.
 
-`VOICE_MODE=mock` delegates to `voice_mock` once #13 lands, using its existing
-callback lifecycle and backend fixtures. If that separate adapter is not present,
-standalone mock calls fail before network access; main's fixture mock pipeline
-remains usable through its backend fallback. Unknown modes fail. No code from an
-unmerged PR is copied or stacked here.
+`VOICE_MODE=mock` delegates to the merged `voice_mock` adapter, using its
+backend-owned callback lifecycle and synthetic fixtures. Bind callbacks before
+starting a mock call; calls outside that lifecycle fail before network access.
+Unknown modes also fail.
 
 **Backend work needed:** main's build_deps still rejects VOICE_MODE=live. Joyce
 must wire live starts off the server event loop, persist external_ref, wait for
@@ -211,15 +210,85 @@ read-only helper:
 
 `python -m integrations.elevenlabs_preflight --env-file ../lifeline-6/.env`
 
-The local run reported missing agent ID, phone-number ID and webhook secret.
-No real call was placed, no live transcript/call_result was demonstrated and no
-live booking receipt exists. PR #84 remains draft until account setup (#67),
-backend live/booking support and the issue's live one-call/three-call acceptance
-are complete. Exact tests and preflight outcome are in its body.
+Account setup (#67) is complete and the local safety preflight passes. The
+successful live adapter test completed naturally in 94 seconds, produced 12
+backend transcript events and one structured call_result, verified the spoken AI
+disclosure, and reported no stored audio or interrupted agent turns. No real
+booking or calendar write was made. The exact command and sanitized outcome are
+in PR #84, ready for review under the coordinator's one-call scope decision.
+
+Three simultaneous real calls or a documented plan-limit stagger remain
+undemonstrated. Live confirm_booking still fails closed pending backend-owned
+approved booking context and structured confirmation evidence. The successful
+single-call test does not claim the entire live pipeline or booking is complete.
 
 Vendor references: [Outbound call](https://elevenlabs.io/docs/api-reference/integrations/twilio/outbound-call),
 [Agent settings](https://elevenlabs.io/docs/api-reference/agents/get),
 [Imported number](https://elevenlabs.io/docs/api-reference/phone-numbers/get).
+
+## Scripted receptionists (#13)
+
+The mock keeps `voice_mock.start_call(call: CallSpec) -> CallHandle` and
+`voice_mock.confirm_booking(call: CallSpec, slot) -> Confirmation`. Both enforce
+`VOICE_MODE=mock` and `DEMO_PHONE_ALLOWLIST`, including for synthetic fixtures.
+No phone is dialed. Use explicit synthetic numbers in the process allowlist for
+local fixture tests; production/demo allowlists remain in the ignored `.env`.
+
+Bind a backend-owned callback around a pipeline run:
+
+```python
+async with voice_mock.callbacks(emit_voice_event) as session:
+    handles = [voice_mock.start_call(spec) for spec in call_specs]
+    offers = await asyncio.gather(*(session.wait_call(h) for h in handles))
+```
+
+`emit_voice_event(event)` receives the schema-shaped `call_status`, `transcript`
+and `call_result` dictionaries, each with `call_id` and `simulated: true`. It may
+be synchronous or asynchronous. The backend shim must route transcript turns
+through the same common recorder as the live proxy, attach the task and proper
+viewer visibility, and publish each event once. `events.emit` expects type
+separate from the payload, so the shim removes `type` before passing that payload.
+Do not have both the recorder and shim emit the same transcript twice.
+
+The backend recorder fix (#87 / PR #88) is merged. The actual callback is
+`record_turn(engine, bus, spec, seq, speaker, text, simulated=True)`, using the
+backend proxy CallSpec loaded by `load_spec`. The simulator supplies stable
+1-based transcript `seq` values scoped to each call, ordered by fixture timing.
+The backend owns persistence, task visibility and deduplication by `(call_id, seq)`.
+Status/result events retain their normal sink; transcripts are published once.
+
+`integrations/tests/test_voice_backend_callback.py` exercises the actual default
+bridge and backend sink against an in-memory synthetic database. Both assertions
+are required passing tests: three completed calls and 13 simulated transcript
+lines, with one recorder invocation and one matching Turn row per transcript.
+The adapter itself never imports backend persistence or writes a database.
+
+`start_call` returns immediately and schedules timed playback; the context exits
+only after playback finishes, or cancels pending tasks on failure/cancellation.
+The returned offer comes from structured fixture results, never transcript text.
+`slotOk` checks full slot containment in the supplied free windows. Clinic
+identity is matched by fixture place ID, not phone, so a safe teammate-number
+substitution can retain the same script. Unknown scripts and missing first-agent
+AI disclosures fail before any events. Timing follows fixture `at_ms` values,
+including the longer hold. All three calls share the event loop and overlap.
+
+Within one session, an identical call-ID/spec retry reuses its task and handle;
+a conflicting specification fails. Persisted receipts and idempotency across
+process/session restarts remain the backend's responsibility. Callback failures
+propagate through `wait_call` or context exit. Nested async contexts keep separate
+callbacks and task registries.
+
+Booking reads the fixture's structured `booking_reply` and only accepts the
+offered slot (label, aware ISO timestamp, Window or start/end mapping). Bright
+Smile/Smile Co. produce simulated confirmed receipts; Oak Dental produces the
+simulated tentative T7 variant without a confirmation reference. This method
+returns synthetic facts only; the backend must enforce the approval gate and
+never create a calendar event for tentative results.
+
+`python -m pytest -q integrations/tests/test_voice_mock.py` includes one real-time
+fixture test (about 15 seconds), plus fast callback, retry, allowlist, disclosure,
+slot-match, cancellation and tentative-receipt regressions. External networking
+is forbidden; Windows asyncio's internal loopback socket pair is allowed.
 
 ## Live SMS (#27)
 

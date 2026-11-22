@@ -19,11 +19,13 @@ import type {
   TranscriptEvent,
   TransportCheckEvent,
 } from "@/lib/events";
+import { eventTaskId } from "@/lib/events";
 
 export type CallState = {
   call_id: string;
   clinic: string;
   meta?: string;
+  graph?: { label: string; text: string; clinic?: boolean }[];
   status: CallStatus;
   transcripts: { speaker: TranscriptEvent["speaker"]; text: string }[];
   result?: {
@@ -37,6 +39,8 @@ export type CallState = {
 export type DashboardState = {
   taskId?: string;
   taskStatus?: string;
+  /** From the latest failed `task_updated` (reason + honest message). */
+  failure?: { reason?: string; message?: string };
   request?: { text?: string; chips: string[] };
   calls: CallState[];
   decision?: {
@@ -81,6 +85,7 @@ function upsertCall(calls: CallState[], call_id: string, patch: Partial<CallStat
         call_id,
         clinic: patch.clinic ?? call_id,
         meta: patch.meta,
+        graph: patch.graph,
         status: patch.status ?? "dialing",
         transcripts: patch.transcripts ?? [],
         result: patch.result,
@@ -92,7 +97,14 @@ function upsertCall(calls: CallState[], call_id: string, patch: Partial<CallStat
   return next;
 }
 
+function withTaskId(state: DashboardState, event: LiveEvent): DashboardState {
+  // Live events carry task_id; without this, Approve/ride reply stay broken until a reconnect snapshot.
+  const taskId = eventTaskId(event);
+  return taskId && state.taskId !== taskId ? { ...state, taskId } : state;
+}
+
 function reduceOne(state: DashboardState, event: LiveEvent): DashboardState {
+  state = withTaskId(state, event);
   switch (event.type) {
     case "heartbeat":
       return state;
@@ -114,6 +126,7 @@ function reduceOne(state: DashboardState, event: LiveEvent): DashboardState {
         ...state,
         calls: upsertCall(state.calls, e.call_id, {
           clinic: e.clinic,
+          graph: [{ label: "Clinic call", text: e.clinic }],
           meta: e.meta,
           status: "dialing",
           transcripts: [],
@@ -135,15 +148,23 @@ function reduceOne(state: DashboardState, event: LiveEvent): DashboardState {
       const transcripts = [...(existing?.transcripts ?? []), { speaker: e.speaker, text: e.text }];
       return {
         ...state,
-        calls: upsertCall(state.calls, e.call_id, { transcripts }),
+        calls: upsertCall(state.calls, e.call_id, {
+          transcripts,
+          graph: [...(existing?.graph ?? []), {
+            label: e.speaker === "clinic" ? "Clinic replied" : "Assistant spoke",
+            text: e.text, clinic: e.speaker === "clinic",
+          }],
+        }),
       };
     }
 
     case "call_result": {
       const e = event as CallResultEvent;
+      const existing = state.calls.find(call => call.call_id === e.call_id);
       return {
         ...state,
         calls: upsertCall(state.calls, e.call_id, {
+          graph: [...(existing?.graph ?? []), { label: "Offer received", text: `${e.slot} · ${e.price}` }],
           result: {
             price: e.price,
             slot: e.slot,
@@ -161,8 +182,8 @@ function reduceOne(state: DashboardState, event: LiveEvent): DashboardState {
         decision: {
           winner: e.winner,
           title: e.title,
-          reasons: e.reasons,
-          second: e.second,
+          reasons: e.reasons ?? [],
+          second: e.second ?? [],
           tradeoff: e.tradeoff,
         },
       };
@@ -257,8 +278,15 @@ function reduceOne(state: DashboardState, event: LiveEvent): DashboardState {
       };
     }
 
-    case "task_updated":
-      return { ...state, taskStatus: event.status };
+    case "task_updated": {
+      const next: DashboardState = { ...state, taskStatus: event.status };
+      if (event.status === "failed") {
+        next.failure = { reason: event.reason, message: event.message };
+      } else if (event.status === "completed" || event.status === "cancelled") {
+        next.failure = undefined;
+      }
+      return next;
+    }
 
     default:
       return state;
