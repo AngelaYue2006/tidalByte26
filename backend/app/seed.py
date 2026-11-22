@@ -96,7 +96,7 @@ def _seed_run(session: Session, run: dict, clinics: dict[str, dict], now: dateti
     trail: list[tuple[str, dict, str]] = [
         ("task_updated", {"status": "intake"}, "contact"),
         ("task_updated", {"status": "calendar"}, "contact"),
-        ("request", {"text": run["text"], "chips": texts.chips(intake.care_type, intake.budget_max, intake.insurance_carrier, windows)}, "contact"),
+        ("request", {"text": run["text"], "chips": texts.chips(intake.care_type, intake.budget_max, intake.insurance_carrier, windows, (datetime.fromisoformat(intake.time_range.start), datetime.fromisoformat(intake.time_range.end)))}, "contact"),
         ("task_updated", {"status": "places"}, "contact"),
     ]
     for call_id, offer in offers.items():
@@ -126,7 +126,7 @@ def _seed_run(session: Session, run: dict, clinics: dict[str, dict], now: dateti
         driver = contact.name.split()[0]
         trail += [
             ("task_updated", {"status": "awaiting_contact"}, "contact"),
-            ("contact_request", {"contact": driver, "message": texts.contact_request_message(first, intake.care_type, winner.clinic, winner.slot_start, address)}, "contact"),
+            ("contact_request", {"contact": driver, "message": texts.contact_request_message(driver, first, intake.care_type, winner.clinic, winner.slot_start, address)}, "contact"),
             ("contact_reply", {"contact": driver, "text": "I can drive.", "offer": {"can_drive": True}}, "contact"),
             ("ride_confirmed", {"driver": driver, "pickup_time": ride["pickup_time"]}, "contact"),
             ("notified", {"sms_contact": texts.ride_confirmed_sms_contact(first, winner.clinic, winner.slot_start),

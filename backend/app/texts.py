@@ -6,12 +6,13 @@ scope: clinic, time, address and the ride need.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.ranking import money, slot_label
 
 
-def chips(care_type: str, budget_max: float | None, carrier: str | None, windows: list) -> list[str]:
+def chips(care_type: str, budget_max: float | None, carrier: str | None, windows: list, time_range: tuple[datetime, datetime] | None = None) -> list[str]:
+    """The request chips. `time_range` is the requested range, so a window that covers all of it reads "all week"."""
     out = [care_type[:1].upper() + care_type[1:]]
     if budget_max is not None:
         out.append(f"Max {money(budget_max)}")
@@ -20,12 +21,24 @@ def chips(care_type: str, budget_max: float | None, carrier: str | None, windows
     if windows:
         labels = []
         for w in windows:
-            label = f"{w.start:%a} {'am' if w.start.hour < 12 else 'pm'}"
+            label = window_chip(w.start, w.end, time_range)
             if label not in labels:
                 labels.append(label)
         out.append("Free: " + ", ".join(labels))
     out.append("!Processed on device")
     return out
+
+
+def window_chip(start: datetime, end: datetime, time_range: tuple[datetime, datetime] | None = None) -> str:
+    """One free window as a chip: "Thu am" inside one part of a day, "Tue–Sun" when it crosses midnight, "all week" when
+    the one window covers the whole requested range. Live freeBusy returns the week minus the busy blocks, so its windows
+    are multi-day spans; the fixture's are single mornings and afternoons (#107)."""
+    if time_range is not None and start <= time_range[0] and end >= time_range[1]:
+        return "all week"
+    last_day = (end - timedelta(microseconds=1)).date()  # a window ending exactly at midnight belongs to the day before
+    if last_day > start.date():
+        return f"{start:%a}–{end - timedelta(microseconds=1):%a}"
+    return f"{start:%a} {'am' if start.hour < 12 else 'pm'}"
 
 
 def clock(when: datetime) -> str:
@@ -57,9 +70,10 @@ def approval_reminder_sms(clinic: str, start: datetime, price: float) -> str:
     return f"LifeLine reminder: {clinic}, {slot_label(start)} for {money(price)} is still open. Reply YES to book or NO to cancel."
 
 
-def contact_request_message(owner_first_name: str, care_type: str, clinic: str, start: datetime, address: str) -> str:
+def contact_request_message(contact_first_name: str, owner_first_name: str, care_type: str, clinic: str, start: datetime, address: str) -> str:
+    """The ride request as the contact reads it: addressed to them, then the four facts, then the question."""
     return (
-        f"LifeLine: {owner_first_name} has a {care_type} at {clinic}, {day_and_time(start)}, {address}. "
+        f"LifeLine: {contact_first_name}, {owner_first_name} has a {care_type} at {clinic}, {day_and_time(start)}, {address}. "
         f"No accessible ride is available. Can you drive {owner_first_name}? Reply YES or NO."
     )
 

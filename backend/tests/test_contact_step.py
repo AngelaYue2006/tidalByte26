@@ -48,6 +48,7 @@ FACTS = ContactFacts(
     "123 Main St, Chicago, IL 60601",
 )
 TEMPLATE = texts.contact_request_message(
+    "Sarah",
     "Mary",
     "dental cleaning",
     "Bright Smile Dental",
@@ -146,6 +147,15 @@ def test_model_message_passes_the_check_and_carries_only_the_four_facts(metrics_
             "Mary has a dental cleaning at Bright Smile Dental, 9:30 AM, 123 Main St. Please drive her.",
             {"missing_reply_instruction"},
         ),
+        # the exact text Nano wrote in the first full browser run (#105): it must address Sarah, never open with Mary
+        (
+            "Mary Sarah can you drive Mary to Bright Smile Dental on Thu Nov 26, 9:30 AM at 123 Main St, Chicago, IL 60601? No accessible ride was found. Reply YES or NO.",
+            {"salutation"},
+        ),
+        (
+            "Hi there, Mary has a dental cleaning at Bright Smile Dental, 9:30 AM, 123 Main St. Can you drive? Reply YES or NO.",
+            {"salutation"},
+        ),
     ],
 )
 def test_a_model_message_that_leaks_or_drops_a_fact_is_refused_and_the_template_is_sent(
@@ -232,6 +242,8 @@ def test_contact_message_in_the_pipeline_is_the_model_text_with_nothing_private(
     assert request["message"] != TEMPLATE, (
         "FakeNano's text passed the check, so the model wrote the message"
     )
+    opening = request["message"][:40]
+    assert "Sarah" in opening and not request["message"].startswith("Mary"), "the text is addressed to the contact"
     for value in PRIVATE:
         assert value not in request["message"], value
 

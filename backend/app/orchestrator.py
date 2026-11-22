@@ -201,7 +201,8 @@ class Pipeline:
         run.windows = list(self.deps.free_windows(run.owner.id, intake.time_range.start, intake.time_range.end))
         with session_scope(self.engine) as session:
             session.get(Task, run.task_id).windows_json = json.dumps([{"start": w.start.isoformat(), "end": w.end.isoformat()} for w in run.windows])
-        self._emit(run, "request", {"text": run.text, "chips": texts.chips(intake.care_type, intake.budget_max, intake.insurance_carrier, run.windows)}, "contact")
+        requested = (datetime.fromisoformat(intake.time_range.start), datetime.fromisoformat(intake.time_range.end))
+        self._emit(run, "request", {"text": run.text, "chips": texts.chips(intake.care_type, intake.budget_max, intake.insurance_carrier, run.windows, requested)}, "contact")
 
     def _places(self, run: Run) -> None:
         self._set_status(run, "places")
@@ -370,7 +371,7 @@ class Pipeline:
         spec = run.specs[run.winner.call_id]
         first = run.owner.name.split()[0]
         facts = local_intake.ContactFacts(first, name.split()[0], run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
-        template = texts.contact_request_message(first, run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
+        template = texts.contact_request_message(name.split()[0], first, run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
         # Nano writes the scoped message on the device from the full record; the check falls back to the template (rule 4).
         written = await asyncio.to_thread(
             local_intake.contact_message, run.owner, run.intake, facts,
