@@ -126,7 +126,9 @@ def test_live_sends_snapshot_then_events_with_increasing_ids_and_sse_headers(cli
     with client.stream("GET", "/api/live?viewer_id=mary") as resp:
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/event-stream")
-        assert resp.headers["cache-control"] == "no-cache"
+        # #102: no-transform and identity keep the Next.js dev server and tunnels from gzip-buffering the stream
+        assert resp.headers["cache-control"] == "no-cache, no-transform"
+        assert resp.headers["content-encoding"] == "identity"
         assert resp.headers["x-accel-buffering"] == "no"
         messages = sse_messages(resp.iter_lines())
         snap_id, snap = next(messages)

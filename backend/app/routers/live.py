@@ -18,7 +18,14 @@ router = APIRouter(prefix="/api", tags=["live"])
 
 HEARTBEAT_SECONDS = 15.0
 # Tunnels buffer SSE unless told not to (CLAUDE.md, Common issues).
-SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
+# no-transform and an explicit identity encoding stop proxies (the Next.js dev server, tunnels) from gzipping the stream:
+# a gzip buffer never flushes a text/event-stream, and the browser's EventSource then receives nothing (#102).
+SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Content-Encoding": "identity",
+    "X-Accel-Buffering": "no",
+    "Connection": "keep-alive",
+}
 
 
 def format_sse(data: dict, event_id: int | None) -> str:
