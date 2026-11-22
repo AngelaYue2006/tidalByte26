@@ -62,7 +62,7 @@ def main():
             port=0,
             open_browser=True,
             authorization_prompt_message="",
-            success_message="LifeLine authorization received. You may close this tab.",
+            success_message="GranniAI authorization received. You may close this tab.",
             timeout_seconds=300,
             access_type="offline",
             prompt="consent select_account",

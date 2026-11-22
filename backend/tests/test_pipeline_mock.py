@@ -466,7 +466,7 @@ def test_refused_sms_is_reported_to_the_owner_and_never_shown_as_sent(monkeypatc
         client.post("/api/contacts/offers?viewer_id=sarah", json={"task_id": task_id, "contact_id": "sarah", "offer": {"can_drive": True}, "idempotency_key": "r"})
         wait_for(client, task_id, "completed")
         notified = next(e for e in events(client, task_id) if e["type"] == "notified")
-        assert notified["sms_user"] == "" and notified["sms_contact"].startswith("LifeLine:"), "the contact's receipt is shown, the owner's refusal is not faked"
+        assert notified["sms_user"] == "" and notified["sms_contact"].startswith("GranniAI:"), "the contact's receipt is shown, the owner's refusal is not faked"
     finally:
         client.__exit__(None, None, None)
 

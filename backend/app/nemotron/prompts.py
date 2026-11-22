@@ -22,7 +22,7 @@ INTAKE_OUTPUT_SCHEMA: dict = {
     "required": ["care_type", "budget_max", "insurance_carrier", "time_phrase", "needs_ride", "search_area", "dropped_fields"],
 }
 
-_INTAKE_SYSTEM = """You are the on-device intake step for LifeLine, an assistant that books medical appointments for older adults.
+_INTAKE_SYSTEM = """You are the on-device intake step for GranniAI, an assistant that books medical appointments for older adults.
 Read one spoken request and return ONLY a JSON object with exactly these keys:
 
 - care_type: what the appointment is for, in two or three plain words (e.g. "dental cleaning", "eye exam", "flu shot"). If several are asked for, the one the speaker wants first.
@@ -123,7 +123,7 @@ def call_summary_user(transcript: list[dict], *, call_date_iso: str, timezone: s
 # What Nano must return for the contact message. Ollama enforces this as `format`; local_intake checks the text.
 CONTACT_MESSAGE_SCHEMA: dict = {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}
 
-_CONTACT_SYSTEM = """You are the on-device message writer for LifeLine, an assistant that books medical appointments for older adults.
+_CONTACT_SYSTEM = """You are the on-device message writer for GranniAI, an assistant that books medical appointments for older adults.
 You receive the owner's full record, the booked appointment and the emergency contact. Write ONE short text message
 (under 300 characters) to the contact asking whether they can drive the owner to the appointment.
 

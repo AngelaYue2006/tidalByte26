@@ -82,7 +82,7 @@ def render(summary: dict[str, dict[str, str]], path: Path) -> str:
     for model, table in summary.items():
         lines += ["", f"### model `{model}`", "", "| Metric | Value |", "|---|---|"]
         lines += [f"| {label} | {value} |" for label, value in table.items()]
-    lines += ["", f"Time to booked (LifeLine vs manual): {PENDING}, measured by hand on a timed full run, not by this script."]
+    lines += ["", f"Time to booked (GranniAI vs manual): {PENDING}, measured by hand on a timed full run, not by this script."]
     return "\n".join(lines)
 
 

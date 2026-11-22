@@ -21,9 +21,9 @@ Response: `success`, `message`, `conversation_id` (store as `calls.external_ref`
 
 - The agent is configured with a server URL and a model id; the server must implement `/v1/chat/completions` (OpenAI Chat Completions). **Verified in the dashboard**: the Server URL field takes the base URL and the agent appends `/chat/completions` itself, so the setting is `PUBLIC_BASE_URL/v1`.
 - Replies are Server-Sent Events, `Content-Type: text/event-stream`, each chunk `data: {json}` and a final `data: [DONE]`. Stream from NVIDIA with `stream: true` and relay the chunks.
-- **How `call_id` reaches the proxy**: not through dynamic variables. The request body carries `elevenlabs_extra_body`, an object with whatever was passed as `custom_llm_extra_body` at call start. The proxy reads `call_id` and `proxy_secret` from there. **Verified in the dashboard**: the switch is agent Settings → Security → Overrides → "Custom LLM extra body", and it is on for the `LifeLine` agent.
+- **How `call_id` reaches the proxy**: not through dynamic variables. The request body carries `elevenlabs_extra_body`, an object with whatever was passed as `custom_llm_extra_body` at call start. The proxy reads `call_id` and `proxy_secret` from there. **Verified in the dashboard**: the switch is agent Settings → Security → Overrides → "Custom LLM extra body", and it is on for the `GranniAI` agent.
 - The docs do not state how a secret for a custom server is sent, so `proxy_secret` travels in `custom_llm_extra_body`, which is documented. The proxy rejects any request whose `elevenlabs_extra_body.proxy_secret` does not equal `LLM_PROXY_SECRET`.
-- If the model supports function calling, ElevenLabs system tools (end call) can be used; LifeLine does not need them for the demo.
+- If the model supports function calling, ElevenLabs system tools (end call) can be used; GranniAI does not need them for the demo.
 - Reasoning deltas, if the model emits them, come as `reasoning` or `reasoning_content`; the proxy drops them.
 
 ## Post-call webhook

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LifeLine check: run before every push. Exits non-zero on the first failure.
+# GranniAI check: run before every push. Exits non-zero on the first failure.
 # Runs only what exists so an early skeleton passes; a tool that is installed is a tool that runs.
 set -euo pipefail
 cd "$(dirname "$0")/.."

@@ -2,7 +2,7 @@
 
 Guidance for Claude Code working in this repository.
 
-LifeLine is a hackathon build: an older adult (or their emergency contact) speaks a request on a dashboard, a local Nemotron Nano redacts it, three AI agents phone three clinics in parallel, Nemotron Super ranks the offers and explains the pick, the user approves once, and LifeLine books, adds a calendar event, checks for a ride and texts the emergency contact when none is accessible. **Several AI sessions run at once under three GitHub accounts** (Joyce, Angela, Michael), so a session cannot tell its own past actions from another's — take your own worktree, and trust repository state over any summary.
+GranniAI is a hackathon build: an older adult (or their emergency contact) speaks a request on a dashboard, a local Nemotron Nano redacts it, three AI agents phone three clinics in parallel, Nemotron Super ranks the offers and explains the pick, the user approves once, and GranniAI books, adds a calendar event, checks for a ride and texts the emergency contact when none is accessible. **Several AI sessions run at once under three GitHub accounts** (Joyce, Angela, Michael), so a session cannot tell its own past actions from another's — take your own worktree, and trust repository state over any summary.
 
 ## Before you write code
 
