@@ -85,6 +85,7 @@ Every external side effect (SMS, booking, calendar insert) is keyed by `task_id`
 | `GET` | `/api/tasks/{id}/events` | — | ordered events filtered by viewer visibility |
 | `POST` | `/api/tasks/{id}/approve` | `{actor_id, decision: "approve" or "reject", idempotency_key}` | owner only |
 | `POST` | `/api/contacts/offers` | `{task_id, contact_id, offer: {can_drive, pickup_time?}, idempotency_key}` | contact's dashboard reply |
+| `GET` | `/api/users/{owner_id}` | `?viewer_id` | the owner's on-device record for the Profile tab, read-only, member ID masked; owner viewer only, 404 for a contact |
 | `GET` | `/api/live` | `?viewer_id` | **SSE**: `snapshot` then events; viewer-scoped |
 | `GET` | `/api/session` | — | sets the `lifeline_session` cookie; the dashboard calls it once before any read |
 | `POST` | `/v1/chat/completions` | OpenAI chat format from ElevenLabs | custom LLM proxy to Lightning; streams; logs turns |

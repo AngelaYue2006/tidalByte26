@@ -24,6 +24,7 @@ from app.routers import (
     llm_proxy,
     requests,
     tasks,
+    users,
     webhooks,
 )
 
@@ -69,6 +70,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
     app.include_router(session.router)
     app.include_router(live.router)
     app.include_router(tasks.router)
+    app.include_router(users.router)
     app.include_router(requests.router)
     app.include_router(approvals.router)
     app.include_router(contacts.router)
