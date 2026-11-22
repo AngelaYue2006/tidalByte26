@@ -400,8 +400,10 @@ def test_upstream_gets_our_prompt_and_only_redacted_facts(client, app):
     assert messages[0]["role"] == "system"
     system = messages[0]["content"]
     assert OPENING_LINE in system
-    for fact in ("Bright Smile Dental", "dental cleaning", "$150", "Delta Dental", "Tue 1:00–5:00", "Thu 8:00–12:00"):
+    for fact in ("Bright Smile Dental", "dental cleaning", "Delta Dental", "Tue 1:00–5:00", "Thu 8:00–12:00"):
         assert fact in system
+    # #123: the receptionist never hears the budget; the hard rules apply it after the call
+    assert "$150" not in system and "150" not in system and "budget" not in system.lower().replace("the patient's budget", "")
     serialised = json.dumps(messages)
     for secret in ("DEMO-0000", "knee", "Mary", "member_id", "ElevenLabs default agent prompt", "elevenlabs_extra_body", PROXY_SECRET):
         assert secret not in serialised
@@ -434,8 +436,19 @@ def test_prompt_discloses_ai_and_never_books():
     assert "You are an AI" in prompt
     assert "Never book" in prompt
     assert "no insurance to mention" in prompt
-    assert "budget" not in prompt.lower().replace("the patient's budget", "")  # no budget line when None
     assert window_label(*spec.windows[0]) == "Thu 8:00–12:00"
+    # #123, from the fourth live call: no budget on the phone, cash price first, the clinic's openings before our windows.
+    with_budget = call_agent(spec.model_copy(update={"budget_max": 150, "insurance_carrier": "Delta Dental"}))
+    for text in (prompt, with_budget):
+        assert "$" not in text and "150" not in text, "the budget figure never reaches the prompt"
+        assert "Never state or hint at the patient's budget" in text and "whether a price fits" in text
+        assert text.index("1. Cash price") < text.index("2. Insurance") < text.index("3. Openings")
+        assert "costs for a patient paying without insurance" in text
+        assert "what appointment openings they have next week" in text
+        assert text.index("what appointment openings they have next week") < text.index("Thu 8:00–12:00")
+        assert "Do not mention the patient's free windows until the receptionist has named their openings" in text
+    assert "whether the clinic accepts Delta Dental, and what a dental cleaning costs with it" in with_budget
+    assert "go straight to question 3" in prompt and "go straight to question 3" not in with_budget
 
 
 def test_build_messages_drops_vendor_system_prompt_and_keeps_order():
@@ -443,7 +456,7 @@ def test_build_messages_drops_vendor_system_prompt_and_keeps_order():
     out = build_messages(spec, [{"role": "system", "content": "vendor"}, {"role": "user", "content": "hello"}, {"role": "assistant", "content": None}])
     assert [m["role"] for m in out] == ["system", "user", "assistant"]
     assert out[2]["content"] == ""
-    assert "any time this week" in out[0]["content"]
+    assert "any time next week" in out[0]["content"]
 
 
 def test_reasoning_deltas_are_stripped_before_relay():
