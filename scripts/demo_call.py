@@ -68,10 +68,16 @@ def target_number(settings: Settings, entry: int) -> str:
     return number
 
 
+def next_week_monday(now: datetime) -> datetime:
+    """Midnight on the Monday after the current week, in `now`'s timezone: the agent asks for openings next week (#123)."""
+    this_monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    return this_monday + timedelta(days=7)
+
+
 def demo_windows(now: datetime) -> list[dict]:
-    """Two free windows in the current week in the owner's timezone: Tuesday 9:00-12:00 and Thursday 13:00-17:00,
-    so an offer of "Thursday at two" fits and "Thursday at 9:30" does not."""
-    monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    """Two free windows next week in the owner's timezone: Tuesday 9:00-12:00 and Thursday 13:00-17:00,
+    so an offer of "Thursday at two" fits and "Thursday at 9:30" does not. Next week, whatever weekday the script runs on."""
+    monday = next_week_monday(now)
     tuesday, thursday = monday + timedelta(days=1), monday + timedelta(days=3)
     return [
         {"start": tuesday.replace(hour=9).isoformat(), "end": tuesday.replace(hour=12).isoformat()},
@@ -83,7 +89,7 @@ def seed(engine, clinic_phone: str, *, now: datetime | None = None, owner_id: st
     """One Task in `calling` with the redacted dental intake, one Call in `dialing` with no result."""
     tz = ZoneInfo("America/Chicago")
     now = now or datetime.now(tz)
-    monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    monday = next_week_monday(now)
     intake = IntakeRequest(
         care_type="dental cleaning", budget_max=150, insurance_carrier="Delta Dental",
         time_range=TimeRange(start=monday.isoformat(), end=(monday + timedelta(days=6, hours=23, minutes=59)).isoformat()),
