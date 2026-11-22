@@ -138,7 +138,7 @@ html { scrollbar-gutter: stable; }
 .header-settings select[aria-label="Dashboard mode"] { width: 6rem; }
 .header-settings select[aria-label="Dashboard role"] { width: 10rem; }
 .activity-controls { display: flex; justify-content: flex-end; margin-bottom: 16px; }
-.history-page .card,.calendar-page .card,.history-detail .card {
+.history-page .card,.calendar-page .card,.history-detail .card,.profile-page .card {
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--card);
 }
 .history-sim-banner { background: transparent; color: var(--muted); padding: 0; }
@@ -163,3 +163,12 @@ html { scrollbar-gutter: stable; }
 .intake-options label:has(:checked) { background: var(--sky-bg); border-color: var(--accent); }
 .intake-options input { width: 1.15rem; height: 1.15rem; accent-color: var(--accent); }
 .intake-amount { display: block; width: min(100%, 14rem); margin-top: 5px; padding: 10px; border: 1px solid #7891a4; border-radius: 6px; font: inherit; }
+
+/* Profile tab (#109): the on-device record, read-only. */
+.profile-page { display: grid; gap: 20px; }
+.profile-card { padding: clamp(18px, 3vw, 28px); }
+.profile-card .eyebrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px 24px; margin: 0; }
+.profile-grid dt { font-size: .9rem; color: var(--muted); margin-bottom: 4px; }
+.profile-grid dd { margin: 0; font-size: 1.25rem; font-weight: 500; overflow-wrap: anywhere; }
+.profile-shared { margin: 12px 0; padding-left: 1.2em; font-size: 1.1rem; line-height: 1.7; }

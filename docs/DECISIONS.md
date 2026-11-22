@@ -60,6 +60,10 @@ The simulated `?workspace=demo` path can run the same questions with a labelled 
 - Google Cloud project with Calendar, Places and Routes API enabled; OAuth test user added.
 - [x] Ollama with a 4-bit Nemotron Nano pulled on the demo laptop (#52): `nemotron-3-nano:4b-q4_K_M`, the 4-bit GGUF of Nemotron 3 Nano 4B (the 30B-A3B is about 18 GB at 4-bit). Measured through `POST /api/chat` with a JSON `format` and `think: false`: 2.1 s warm for the demo request (10.4 s on the first call while the model loads; 9.5 s with thinking on). The intake step must send `think: false` and warm the model at startup.
 
+## Open items from the Profile tab (#109)
+
+- The dashboard has an owner-only, read-only **Profile** tab showing the on-device record (name, date of birth, address, carrier, masked member ID) beside the six intake fields a clinic may hear. It is the before-picture for the redaction chips. Served by `GET /api/users/{owner_id}` from `backend/fixtures/users.json`; a contact viewer gets 404 (D6, rule 4). Creating or editing a profile is roadmap, not MVP. Default taken on 2026-11-21.
+
 ## Open items from the shared schemas (#2)
 
 - `call_result.price` and `call_result.slot` are display strings (`"$95"`, `"Thu 9:30"`), as the prototype renders them. The numeric price and ISO slot live in `Offer` and the task `booking`; the dashboard never computes from the event. Default taken in `shared/events.schema.json`.

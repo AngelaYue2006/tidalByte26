@@ -1,4 +1,4 @@
-// fetch wrappers: postRequest, approve, contactOffer, getTasks, getTask, getEvents.
+// fetch wrappers: postRequest, approve, contactOffer, getTasks, getTask, getEvents, getUser.
 // Every call carries viewer_id from the role picker (URL) and goes through apiFetch, which
 // fetches the dashboard session cookie once and retries once on a 401 (lib/session.ts).
 
@@ -26,6 +26,23 @@ export function taskEventsUrl(taskId: string, viewerId: string): string {
   return withViewer(`/api/tasks/${encodeURIComponent(taskId)}/events`, viewerId);
 }
 
+/** The owner's on-device record — owner viewer only; the backend answers 404 for a contact. */
+export function userUrl(ownerId: string, viewerId: string): string {
+  return withViewer(`/api/users/${encodeURIComponent(ownerId)}`, viewerId);
+}
+
+export type UserProfile = {
+  id: string;
+  name: string;
+  dob: string | null;
+  timezone: string;
+  phone_e164: string;
+  home_address: string | null;
+  insurance: { carrier: string; member_id_masked: string | null } | null;
+  shared_fields: string[];
+  kept_on_device: boolean;
+};
+
 async function parseJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -47,6 +64,11 @@ export async function getTask(taskId: string, viewerId: string): Promise<unknown
 /** Ordered events for a task, filtered by viewer visibility. */
 export async function getEvents(taskId: string, viewerId: string): Promise<unknown> {
   return parseJson(await apiFetch(taskEventsUrl(taskId, viewerId)));
+}
+
+/** Owner record for the Profile tab. The viewer asks for their own id. */
+export async function getUser(viewerId: string): Promise<UserProfile> {
+  return parseJson<UserProfile>(await apiFetch(userUrl(viewerId, viewerId)));
 }
 
 export async function postRequest(
