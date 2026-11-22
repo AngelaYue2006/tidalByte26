@@ -55,7 +55,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         yield
         engine.dispose()
 
-    app = FastAPI(title="LifeLine", version=VERSION, lifespan=lifespan)
+    app = FastAPI(title="GranniAI", version=VERSION, lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = engine
     app.state.bus = EventBus()

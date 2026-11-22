@@ -1,4 +1,4 @@
-# LifeLine — Hackathon MVP and Delivery Plan
+# GranniAI — Hackathon MVP and Delivery Plan
 
 ## Fixed demo scope
 
@@ -38,9 +38,9 @@ Real clinic calls; real transport booking; insurance eligibility checks; medical
 2. **Request (20 s):** Tap the mic, speak the request. Chips appear with "Processed on device". Optional: Wi-Fi off during this step, on afterward.
 3. **Calls (60 s):** Three cards go Dialing, Live, and fill with transcripts from the scripted receptionists (`VOICE_MODE=mock`, `simulated: true` on the cards; D17). Results fill in: $95 Thu 9:30 Yes; $120 Fri 4:00 Yes; $140 Mon 10:00 Yes. Then show one of the live call transcripts made beforehand as evidence that the same agent works on a real phone.
 4. **Decision (20 s):** "Why Nemotron picked Bright Smile Dental" with reason tags and the trade-off sentence.
-5. **Approve (10 s):** The dashboard shows the pick and the simulated text Mary would receive (`SMS_MODE=mock` outbound, D16); tap Approve on the dashboard, or answer YES by a real SMS to the LifeLine number. Booking confirmed; calendar event appears.
-6. **Ride (30 s):** Transport check shows "No accessible ride found (simulated)". The dashboard shows the simulated ride request Sarah would receive (D16). Sarah answers "I can drive her" by a real SMS to the LifeLine number, or taps her dashboard button. Dashboard shows the ride confirmed.
-7. **Close (20 s):** Final texts land; history page shows the run. End on the number: time to a booked appointment with LifeLine versus calling three clinics yourself.
+5. **Approve (10 s):** The dashboard shows the pick and the simulated text Mary would receive (`SMS_MODE=mock` outbound, D16); tap Approve on the dashboard, or answer YES by a real SMS to the GranniAI number. Booking confirmed; calendar event appears.
+6. **Ride (30 s):** Transport check shows "No accessible ride found (simulated)". The dashboard shows the simulated ride request Sarah would receive (D16). Sarah answers "I can drive her" by a real SMS to the GranniAI number, or taps her dashboard button. Dashboard shows the ride confirmed.
+7. **Close (20 s):** Final texts land; history page shows the run. End on the number: time to a booked appointment with GranniAI versus calling three clinics yourself.
 
 **Backup:** `frontend/prototype/index.html` replays the same events with synthesized clinic voices; a screen recording of a full live run.
 

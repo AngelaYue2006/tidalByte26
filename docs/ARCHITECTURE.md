@@ -1,4 +1,4 @@
-# LifeLine — Architecture and Interface Contracts
+# GranniAI — Architecture and Interface Contracts
 
 > **Status: v1 contracts, agreed 2026-11-21.** Changes go through PR with review by the affected owners. Typed schemas in `shared/` become the source of truth once they exist and match this file.
 

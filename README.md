@@ -1,8 +1,8 @@
-# LifeLine
+# GranniAI
 
-**One request, three phone calls, one tap. LifeLine books the appointment and brings the family in only when it has to.**
+**One request, three phone calls, one tap. GranniAI books the appointment and brings the family in only when it has to.**
 
-LifeLine is a hackathon prototype of a voice agent for older adults and the people who help them. The user says what they need. A local Nemotron model strips out anything a clinic doesn't need to hear. Three AI call agents phone nearby clinics at the same time, ask about insurance, price and openings, and a larger Nemotron model ranks the answers and explains the pick. The user approves with one tap, LifeLine books it, adds it to Google Calendar, checks for a ride and, if there is no accessible option, texts the emergency contact, who can reply by text or on the shared dashboard.
+GranniAI is a hackathon prototype of a voice agent for older adults and the people who help them. The user says what they need. A local Nemotron model strips out anything a clinic doesn't need to hear. Three AI call agents phone nearby clinics at the same time, ask about insurance, price and openings, and a larger Nemotron model ranks the answers and explains the pick. The user approves with one tap, GranniAI books it, adds it to Google Calendar, checks for a ride and, if there is no accessible option, texts the emergency contact, who can reply by text or on the shared dashboard.
 
 > **Status:** documentation and skeleton only. Nothing in this repository books real appointments yet. Clinics in the demo are teammates' phones; transport is simulated.
 

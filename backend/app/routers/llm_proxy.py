@@ -81,7 +81,7 @@ def load_spec(engine: Engine, call_id: str) -> CallSpec:
     with session_scope(engine) as session:
         call = session.get(Call, call_id)
         if call is None:
-            raise HTTPException(404, f"unknown call_id {call_id!r}; only calls LifeLine started may use the proxy")
+            raise HTTPException(404, f"unknown call_id {call_id!r}; only calls GranniAI started may use the proxy")
         task = session.get(Task, call.task_id)
         if task is None:
             raise HTTPException(404, f"call {call_id!r} has no task")

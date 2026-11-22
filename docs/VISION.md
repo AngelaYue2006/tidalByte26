@@ -1,8 +1,8 @@
-# LifeLine — Product Vision
+# GranniAI — Product Vision
 
 ## One-line pitch
 
-**LifeLine is a Nemotron-powered voice agent that does the phone calls older adults dread, books what they need with one tap, and brings family in only for the part they are needed for.**
+**GranniAI is a Nemotron-powered voice agent that does the phone calls older adults dread, books what they need with one tap, and brings family in only for the part they are needed for.**
 
 ## Who it is for
 
@@ -14,13 +14,13 @@ Later: anyone who hates phone calls, people who just moved, people without insur
 
 Booking a routine appointment means finding clinics, calling each one, asking the same three questions about insurance, price and openings, comparing the answers against a calendar, calling back, and then arranging a ride. Each step is small. Together they are why appointments get put off, and why an adult child three hours away ends up doing it by phone from work.
 
-## What LifeLine does
+## What GranniAI does
 
 1. **Listens once.** The user speaks or types the request on the dashboard.
 2. **Keeps private things private.** A local Nemotron Nano model turns the request into the few facts a clinic needs and drops the rest before anything leaves the laptop.
 3. **Makes the calls.** Three AI agents phone three nearby clinics at the same time, introduce themselves as an AI assistant calling for a patient, and ask about insurance, price and openings that fit the user's free time.
 4. **Decides and explains.** Hard rules in code remove anything over budget, outside free time or not covered. Nemotron Super ranks the rest and shows why: "Fits your free time Thu 9:30", "Cheapest $95 vs $120", "Closest 1.2 mi", plus the trade-off in one sentence.
-5. **Asks once.** The user taps Approve, or replies YES to a text. That is the only question LifeLine asks.
+5. **Asks once.** The user taps Approve, or replies YES to a text. That is the only question GranniAI asks.
 6. **Finishes the job.** Books with the clinic, creates a private calendar event with a day-before reminder, checks for a ride, and if no accessible ride exists, texts the emergency contact with exactly what they need to know.
 7. **Reports honestly.** Appointment confirmed, ride confirmed, or what is still open. Status comes from verified results, never from what the agent said on the phone.
 
@@ -40,7 +40,7 @@ These are emphases the hackathon should prove on test cases, not claims that oth
 - **Decisions in code, judgment in the model:** budget, calendar and insurance rules are enforced in code; the model ranks and explains within them.
 - **Never fabricate certainty:** the agent's spoken words are conversation, not evidence.
 - **Verifiable actions:** every status change has an event with a timestamp and a source.
-- **No medical judgment:** LifeLine coordinates appointments; it never advises on care.
+- **No medical judgment:** GranniAI coordinates appointments; it never advises on care.
 - **Accessible by design:** one big button, large text, repetition, SMS as a parallel channel.
 - **Graceful fallback:** every external service has a mock mode that emits the same events.
 
@@ -50,7 +50,7 @@ The agent always discloses that it is an AI. During the hackathon only consentin
 
 ## Roadmap (not MVP commitments)
 
-- The user phones LifeLine instead of using the dashboard.
+- The user phones GranniAI instead of using the dashboard.
 - Auto-approve within user-set rules; rescheduling; reminders that confirm the ride the day before.
 - Fine-tuned call agent with before-and-after scores on synthetic receptionist calls.
 - Insurance card photo intake; Spanish-language calls; vet, eye exam, haircut, car repair.
@@ -58,4 +58,4 @@ The agent always discloses that it is an AI. During the hackathon only consentin
 
 ## Success definition
 
-A working closed loop on stage: a spoken request, three live transcripts, an explained pick, one tap, a calendar event, a text to the contact, a reply, and an accurate final status. Plus the number that matters: minutes to a booked appointment with LifeLine versus calling the clinics yourself.
+A working closed loop on stage: a spoken request, three live transcripts, an explained pick, one tap, a calendar event, a text to the contact, a reply, and an accurate final status. Plus the number that matters: minutes to a booked appointment with GranniAI versus calling the clinics yourself.

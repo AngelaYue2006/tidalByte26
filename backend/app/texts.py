@@ -55,45 +55,45 @@ def calendar_card(start: datetime, end: datetime, address: str) -> str:
 
 def booked_sms(clinic: str, start: datetime, price: float, carrier: str | None) -> str:
     with_carrier = f" with {carrier}" if carrier else ""
-    return f"LifeLine: Booked {clinic}, {day_and_time(start)}, {money(price)}{with_carrier}. Reply C to cancel."
+    return f"GranniAI: Booked {clinic}, {day_and_time(start)}, {money(price)}{with_carrier}. Reply C to cancel."
 
 
 def tentative_sms(clinic: str, start: datetime) -> str:
-    return f"LifeLine: {clinic} will call back to confirm {day_and_time(start)}. Nothing is on your calendar yet."
+    return f"GranniAI: {clinic} will call back to confirm {day_and_time(start)}. Nothing is on your calendar yet."
 
 
 def approval_sms(clinic: str, start: datetime, price: float) -> str:
-    return f"LifeLine: Best option is {clinic}, {slot_label(start)} for {money(price)}. Reply YES to book, or tap Approve."
+    return f"GranniAI: Best option is {clinic}, {slot_label(start)} for {money(price)}. Reply YES to book, or tap Approve."
 
 
 def approval_reminder_sms(clinic: str, start: datetime, price: float) -> str:
-    return f"LifeLine reminder: {clinic}, {slot_label(start)} for {money(price)} is still open. Reply YES to book or NO to cancel."
+    return f"GranniAI reminder: {clinic}, {slot_label(start)} for {money(price)} is still open. Reply YES to book or NO to cancel."
 
 
 def contact_request_message(contact_first_name: str, owner_first_name: str, care_type: str, clinic: str, start: datetime, address: str) -> str:
     """The ride request as the contact reads it: addressed to them, then the four facts, then the question."""
     return (
-        f"LifeLine: {contact_first_name}, {owner_first_name} has a {care_type} at {clinic}, {day_and_time(start)}, {address}. "
+        f"GranniAI: {contact_first_name}, {owner_first_name} has a {care_type} at {clinic}, {day_and_time(start)}, {address}. "
         f"No accessible ride is available. Can you drive {owner_first_name}? Reply YES or NO."
     )
 
 
 def ride_confirmed_sms_user(driver: str, clinic: str, start: datetime) -> str:
-    return f"LifeLine: {driver} will drive you to {clinic} on {day_and_time(start)}."
+    return f"GranniAI: {driver} will drive you to {clinic} on {day_and_time(start)}."
 
 
 def ride_confirmed_sms_contact(owner_first_name: str, clinic: str, start: datetime) -> str:
-    return f"LifeLine: Thank you. Ride confirmed for {owner_first_name}'s appointment at {clinic}, {day_and_time(start)}."
+    return f"GranniAI: Thank you. Ride confirmed for {owner_first_name}'s appointment at {clinic}, {day_and_time(start)}."
 
 
 def no_ride_needed_sms_contact(owner_first_name: str, clinic: str, start: datetime, address: str) -> str:
-    return f"LifeLine: Appointment booked for {owner_first_name} — {clinic}, {day_and_time(start)}, {address}."
+    return f"GranniAI: Appointment booked for {owner_first_name} — {clinic}, {day_and_time(start)}, {address}."
 
 
 def contact_declined_sms_user(contact_first_name: str, clinic: str, start: datetime) -> str:
-    return f"LifeLine: {contact_first_name} can't drive you to {clinic} on {day_and_time(start)}. We're still looking for a ride and will text you."
+    return f"GranniAI: {contact_first_name} can't drive you to {clinic} on {day_and_time(start)}. We're still looking for a ride and will text you."
 
 
 def contact_declined_sms_contact(owner_first_name: str) -> str:
-    return f"LifeLine: Thanks for letting us know. We'll keep looking for a ride for {owner_first_name}."
+    return f"GranniAI: Thanks for letting us know. We'll keep looking for a ride for {owner_first_name}."
 
