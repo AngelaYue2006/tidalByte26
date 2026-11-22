@@ -141,7 +141,7 @@ export default function LivePlaceholder() {
         <div className="card status-card" role="alert">
           <p className="bad status-card-text">
             {state.failure?.message ??
-              "Nothing was booked — none of the clinic offers fit the request."}
+              "Nothing was booked."}
           </p>
           {state.failure?.reason ? (
             <p className="faint status-card-text">{state.failure.reason}</p>
