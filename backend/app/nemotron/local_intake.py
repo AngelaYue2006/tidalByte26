@@ -362,6 +362,9 @@ def contact_message_violations(text: str, owner: UserRecord, intake: IntakeReque
         found.append("missing_address")
     if "yes" not in lowered or "no" not in lowered:
         found.append("missing_reply_instruction")
+    # It is Sarah's text: it opens with her name, never with the owner's ("Mary Sarah can you drive Mary..." was real output).
+    if lowered.startswith(facts.owner_first_name.lower()) or facts.contact_first_name.lower() not in lowered[:40]:
+        found.append("salutation")
     # Nothing private: the owner's own identifiers except the first name, the carrier, money, the dropped kinds.
     private = [v for v in _owner_values(owner) if v.lower() != facts.owner_first_name.lower()]
     if intake.insurance_carrier:

@@ -370,7 +370,7 @@ class Pipeline:
         spec = run.specs[run.winner.call_id]
         first = run.owner.name.split()[0]
         facts = local_intake.ContactFacts(first, name.split()[0], run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
-        template = texts.contact_request_message(first, run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
+        template = texts.contact_request_message(name.split()[0], first, run.intake.care_type, run.winner.clinic, run.winner.slot_start, spec.clinic.address)
         # Nano writes the scoped message on the device from the full record; the check falls back to the template (rule 4).
         written = await asyncio.to_thread(
             local_intake.contact_message, run.owner, run.intake, facts,

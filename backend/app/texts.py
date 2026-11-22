@@ -57,9 +57,10 @@ def approval_reminder_sms(clinic: str, start: datetime, price: float) -> str:
     return f"LifeLine reminder: {clinic}, {slot_label(start)} for {money(price)} is still open. Reply YES to book or NO to cancel."
 
 
-def contact_request_message(owner_first_name: str, care_type: str, clinic: str, start: datetime, address: str) -> str:
+def contact_request_message(contact_first_name: str, owner_first_name: str, care_type: str, clinic: str, start: datetime, address: str) -> str:
+    """The ride request as the contact reads it: addressed to them, then the four facts, then the question."""
     return (
-        f"LifeLine: {owner_first_name} has a {care_type} at {clinic}, {day_and_time(start)}, {address}. "
+        f"LifeLine: {contact_first_name}, {owner_first_name} has a {care_type} at {clinic}, {day_and_time(start)}, {address}. "
         f"No accessible ride is available. Can you drive {owner_first_name}? Reply YES or NO."
     )
 
