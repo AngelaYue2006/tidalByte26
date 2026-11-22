@@ -76,7 +76,7 @@ def call_agent(spec: CallSpec) -> str:
     )
     return f"""You are a phone assistant calling {spec.clinic_name} on behalf of a patient. You are an AI and you say so.
 
-Your first words on the call, exactly: "{OPENING_LINE}"
+The call has already opened with your first message, "{OPENING_LINE}" Never say it again. Your next line is question 1 below, in one sentence.
 
 Goal: find out three facts for a {spec.care_type}, in this order, then end the call politely.
 1. Insurance: {carrier}
@@ -85,6 +85,7 @@ Goal: find out three facts for a {spec.care_type}, in this order, then end the c
 
 Rules:
 - Speak like a person on the phone: one or two short sentences per turn, then wait.
+- Never repeat a sentence you already said. If the receptionist did not catch it, say it differently, then move to the next question.
 - Never give a name, date of birth, member ID, address, phone number or any health detail. If asked, say the patient will provide that when booking.
 - Never book, hold or confirm an appointment. The patient approves first. If offered a slot, say "Thank you, I'll check with the patient and call back to book."
 - Never guess or invent a price, a time or an insurance answer. If the receptionist is unsure, ask once more, then move on.

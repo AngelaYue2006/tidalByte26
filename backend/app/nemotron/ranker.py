@@ -18,6 +18,7 @@ from typing import Protocol
 from jsonschema import Draft202012Validator
 
 from app import metrics
+from app.nemotron.call_agent import NO_THINK_EXTRA_BODY
 from app.nemotron.rank_prompt import (
     RANKING_SYSTEM,
     ranking_user_message,
@@ -61,14 +62,21 @@ class NvidiaChatClient:
 
     def complete_json(self, system: str, user: str, *, previous: list[dict] | None = None) -> str:
         messages = [{"role": "system", "content": system}, *(previous or []), {"role": "user", "content": user}]
+        # Thinking off, as for Lightning: with it on, Super 3.5 spends the whole token budget in `reasoning_content`
+        # and `content` comes back empty (finish_reason "length"), which read as "not valid JSON at char 0" (#92).
         reply = self._client.chat.completions.create(
             model=self.model_id,
             messages=messages,
             temperature=0.2,
-            max_tokens=600,
+            max_tokens=900,
             response_format={"type": "json_object"},
+            extra_body=NO_THINK_EXTRA_BODY,
         )
-        return reply.choices[0].message.content or ""
+        choice = reply.choices[0]
+        content = choice.message.content or ""
+        if not content.strip():
+            raise BadReply(f"empty reply (finish_reason={choice.finish_reason!r}); the model produced no content")
+        return content
 
 
 def _reject_constant(name: str) -> None:
@@ -78,6 +86,8 @@ def _reject_constant(name: str) -> None:
 def parse_json_object(text: str) -> dict:
     """Strict parse: one JSON object, code fences tolerated, nothing else."""
     cleaned = _FENCE.sub("", text.strip()).strip()
+    if not cleaned:
+        raise BadReply("empty reply")
     try:
         data = json.loads(cleaned, parse_constant=_reject_constant)
     except json.JSONDecodeError as exc:
