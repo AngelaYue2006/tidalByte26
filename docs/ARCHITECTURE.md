@@ -48,7 +48,7 @@ Deterministic, in this order. Each step writes an event; the task status is the 
 
 1. `intake` — Nano → `IntakeRequest`. Emit `request`.
 
-   The guided dental flow has a preflight before task creation. In the browser demo, a fixed planner checks budget and ride preference, saves only structured progress in the tab and presents the first missing field. The call clock starts after the last answer. Direct requests with both preferences skip this UI.
+   The dashboard may ask for missing budget / ride preferences in the browser and fold the answers into the utterance before `POST /api/requests`. That completes the request (D5); it does not create a task or propose clinic options. Requests that already include both preferences skip the UI. A labelled `?workspace=demo` path can run the same questions as a browser-only simulation. Any backend preference API stays on issue #86.
 
 2. `calendar` — `calendar.free_windows()` for the requested range.
 3. `places` — `places.find_clinics()` top 3, then `distance.drive()` from the owner's home. Emit `call_start` ×3 with distance meta.
@@ -211,13 +211,3 @@ LIVE_STREAM_MODE=sse        # sse | poll
 5. Real Calendar insert once; real Places and Routes API.
 6. SMS round trip through the tunnel: approval YES and contact reply.
 7. Two full runs with reset between them.
-
-
-### Guided requests
-
-The backend implementation lives on the separate guided-intake branch. A live owner client opts in to the existing `POST /api/requests?viewer_id=<owner>` by sending `guided_intake: {}` alongside the existing request body and session cookie. Without this property the existing request contract applies.
-
-- A missing preference returns HTTP 200 with `{"status":"needs_information","question":{"field":"budget","prompt":"How much would you like to spend?","kind":"amount_or_no_maximum"}}`. The other supported field is `ride`, with kind `yes_no`.
-- Resubmit the original text, the same idempotency key and cumulative structured answers. Omitted budget is unanswered, a number is a dollar cap, and explicit null means no cap. Ride accepts true or false. The question endpoint is stateless between submissions. No task, live event or adapter call is created for a question.
-- Once complete, the normal creation response contains `task_id`. The scheduler uses the confirmed preferences in the redacted request. The existing task receipt handles repeat submissions. The preflight is owner-scoped using the existing dashboard session and viewer convention.
-- The planner currently uses deterministic extraction. Backend [issue #86](https://github.com/AngelaYue2006/tidalByte26/issues/86) tracks the on-device Nano planner and Live UI handoff. Nano can select from reviewed field definitions behind this response contract. The browser demo runs independently of the backend.

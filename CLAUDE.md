@@ -76,7 +76,7 @@ When a rule matters, put it in `tests/scenarios/` or `backend/tests/` so it fail
 ## Product rules no test can infer
 
 1. **The raw utterance never leaves the device.** Only the redacted `IntakeRequest` reaches the NVIDIA API, Google, ElevenLabs or any log that ships. Never log the raw text at INFO.
-2. **One approval, then no more questions.** No booking and no calendar write before an `approved` event. The agent decides everything else and reports; it does not propose options to the user.
+2. **One approval before booking, then no more questions.** No booking and no calendar write before an `approved` event. Completing missing request fields (budget, ride) before calls is intake, not a second gate. The agent decides everything else and reports; it does not propose clinic options to the user.
 3. **Status comes from receipts, never from what the agent said.** A `confirmed` Confirmation creates the calendar event, once. Transcript text never changes state or a chip.
 4. **The contact gets their scope and nothing else.** Clinic, time, address, the ride need. Nano writes that message from the full record on the device.
 5. **Only allowlisted phones, and the agent always says it is an AI.** `DEMO_PHONE_ALLOWLIST` is checked on every outbound call and every inbound SMS. Never a real clinic.
