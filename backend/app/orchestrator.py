@@ -201,7 +201,8 @@ class Pipeline:
         run.windows = list(self.deps.free_windows(run.owner.id, intake.time_range.start, intake.time_range.end))
         with session_scope(self.engine) as session:
             session.get(Task, run.task_id).windows_json = json.dumps([{"start": w.start.isoformat(), "end": w.end.isoformat()} for w in run.windows])
-        self._emit(run, "request", {"text": run.text, "chips": texts.chips(intake.care_type, intake.budget_max, intake.insurance_carrier, run.windows)}, "contact")
+        requested = (datetime.fromisoformat(intake.time_range.start), datetime.fromisoformat(intake.time_range.end))
+        self._emit(run, "request", {"text": run.text, "chips": texts.chips(intake.care_type, intake.budget_max, intake.insurance_carrier, run.windows, requested)}, "contact")
 
     def _places(self, run: Run) -> None:
         self._set_status(run, "places")

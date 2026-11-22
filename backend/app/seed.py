@@ -96,7 +96,7 @@ def _seed_run(session: Session, run: dict, clinics: dict[str, dict], now: dateti
     trail: list[tuple[str, dict, str]] = [
         ("task_updated", {"status": "intake"}, "contact"),
         ("task_updated", {"status": "calendar"}, "contact"),
-        ("request", {"text": run["text"], "chips": texts.chips(intake.care_type, intake.budget_max, intake.insurance_carrier, windows)}, "contact"),
+        ("request", {"text": run["text"], "chips": texts.chips(intake.care_type, intake.budget_max, intake.insurance_carrier, windows, (datetime.fromisoformat(intake.time_range.start), datetime.fromisoformat(intake.time_range.end)))}, "contact"),
         ("task_updated", {"status": "places"}, "contact"),
     ]
     for call_id, offer in offers.items():
