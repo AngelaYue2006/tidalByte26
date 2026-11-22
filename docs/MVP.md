@@ -36,7 +36,7 @@ Real clinic calls; real transport booking; insurance eligibility checks; medical
 
 1. **Story (15 s):** "Mary is 78. Her daughter Sarah lives three hours away." Show the dashboard with Mary's name and Sarah as contact.
 2. **Request (20 s):** Tap the mic, speak the request. Chips appear with "Processed on device". Optional: Wi-Fi off during this step, on afterward.
-3. **Calls (60 s):** Three cards go Dialing, Live, and fill with transcripts. Teammates on their phones are the receptionists. Results fill in: $95 Thu 9:30 Yes; $120 Fri 4:00 Yes; $140 Mon 10:00 Yes.
+3. **Calls (60 s):** Three cards go Dialing, Live, and fill with transcripts. Teammates on their phones are the receptionists. Results fill in: $95 Thu 9:30 Yes; $120 Fri 4:00 Yes; $140 Mon 10:00 Yes. **On stage the calls are simulated** (`VOICE_MODE=mock`, scripted receptionists, `simulated: true` on the cards; D17); the live calls were made beforehand and their transcripts are shown as evidence.
 4. **Decision (20 s):** "Why Nemotron picked Bright Smile Dental" with reason tags and the trade-off sentence.
 5. **Approve (10 s):** Mary's phone buzzes with the pick; tap Approve on the dashboard. Booking confirmed; calendar event appears.
 6. **Ride (30 s):** Transport check shows "No accessible ride found (simulated)". Sarah's phone buzzes on stage. She replies "I can drive her." Dashboard shows the ride confirmed.
