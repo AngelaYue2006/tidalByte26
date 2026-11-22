@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 import pytest
 from app.nemotron import intake_backstop as b
 
-NOW = datetime(2026, 11, 23, 9, 0, tzinfo=ZoneInfo("America/Chicago"))
+TZ = ZoneInfo("America/Chicago")
+NOW = datetime(2026, 11, 23, 9, 0, tzinfo=TZ)
 
 
 @pytest.mark.parametrize(
@@ -102,6 +103,22 @@ def test_identifier_values_are_the_literal_strings():
 )
 def test_resolve_time_range(phrase, start, end):
     assert b.resolve_time_range(phrase, NOW) == (start, end)
+
+
+@pytest.mark.parametrize(
+    ("now", "phrase", "start", "end"),
+    [
+        # #124: the two weekend demo runs said "this week" on Saturday evening and got Sat–Sun, which no clinic slot fits
+        (datetime(2026, 11, 21, 19, 11, tzinfo=TZ), "this week", "2026-11-23T00:00:00-06:00", "2026-11-29T23:59:59-06:00"),  # Saturday
+        (datetime(2026, 11, 22, 9, 0, tzinfo=TZ), "this week", "2026-11-23T00:00:00-06:00", "2026-11-29T23:59:59-06:00"),  # Sunday
+        (datetime(2026, 11, 20, 9, 0, tzinfo=TZ), "this week", "2026-11-20T00:00:00-06:00", "2026-11-22T23:59:59-06:00"),  # Friday: unchanged
+        (datetime(2026, 11, 25, 9, 0, tzinfo=TZ), "this week", "2026-11-25T00:00:00-06:00", "2026-11-29T23:59:59-06:00"),  # Wednesday: unchanged
+        (datetime(2026, 11, 21, 19, 11, tzinfo=TZ), "next week", "2026-11-23T00:00:00-06:00", "2026-11-29T23:59:59-06:00"),  # Saturday: unchanged
+        (datetime(2026, 11, 22, 9, 0, tzinfo=TZ), "tomorrow", "2026-11-23T00:00:00-06:00", "2026-11-23T23:59:59-06:00"),  # Sunday: unchanged
+    ],
+)
+def test_this_week_on_a_weekend_means_the_coming_week(now, phrase, start, end):
+    assert b.resolve_time_range(phrase, now) == (start, end)
 
 
 @pytest.mark.parametrize(
