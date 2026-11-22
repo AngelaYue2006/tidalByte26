@@ -170,7 +170,13 @@ def resolve_time_range(phrase: str, now: datetime) -> tuple[str, str]:
     if phrase == "tomorrow":
         start, end_day = today + timedelta(days=1), today + timedelta(days=1)
     elif phrase == "this week":
-        start, end_day = today, today + timedelta(days=6 - today.weekday())
+        if today.weekday() >= 5:
+            # Said on a Saturday or Sunday, "this week" means the coming Mon–Sun, not today and tomorrow (#124): the
+            # clinics are closed, and the two weekend demo runs that resolved to Sat–Sun found no offer inside it.
+            start = today + timedelta(days=7 - today.weekday())
+            end_day = start + timedelta(days=6)
+        else:
+            start, end_day = today, today + timedelta(days=6 - today.weekday())
     elif phrase == "next week":
         start = today + timedelta(days=7 - today.weekday())
         end_day = start + timedelta(days=6)
