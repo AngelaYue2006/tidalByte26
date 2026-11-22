@@ -125,13 +125,13 @@ export const PROTOTYPE_SCENARIO: LiveEvent[] = [
   {
     type: "booked",
     sms_user:
-      "LifeLine: Booked Bright Smile Dental, Thu Nov 26, 9:30 AM, $95 with Delta. Reply C to cancel.",
+      "GranniAI: Booked Bright Smile Dental, Thu Nov 26, 9:30 AM, $95 with Delta. Reply C to cancel.",
     calendar:
       "<b>Appointment</b><br><span class='muted'>Thu Nov 26 · 9:30–10:30 AM<br>123 Main St · private · reminder 1 day before</span>",
   },
   {
     type: "notified",
     sms_contact:
-      "LifeLine: Appointment booked for Mary — Bright Smile Dental, Thu Nov 26 at 9:30 AM, 123 Main St.",
+      "GranniAI: Appointment booked for Mary — Bright Smile Dental, Thu Nov 26 at 9:30 AM, 123 Main St.",
   },
 ];

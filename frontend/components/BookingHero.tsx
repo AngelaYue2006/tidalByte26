@@ -21,7 +21,7 @@ export default function BookingHero({ decision, approval, confirmations }: Props
       : "You're booked"
     : pick
       ? "Suggested time"
-      : "LifeLine's pick";
+      : "GranniAI's pick";
 
   const line = booked
     ? booked.calendar.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()

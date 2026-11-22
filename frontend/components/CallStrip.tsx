@@ -23,7 +23,7 @@ export default function CallStrip({ calls, winnerId }: Props) {
   return (
     <section className="card call-strip" aria-label="Clinic calls">
       <h2 className="call-strip-title">
-        {anyLive ? "LifeLine is calling clinics…" : "Clinic calls"}
+        {anyLive ? "GranniAI is calling clinics…" : "Clinic calls"}
       </h2>
       <ul className="call-strip-list">
         {calls.map((call) => {
