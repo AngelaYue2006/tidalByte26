@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from integrations.elevenlabs_smoke import context, spec_for
+from integrations.elevenlabs_smoke import context, conversation_checks, spec_for
 from integrations.fixtures import read_fixture
 
 
@@ -49,3 +49,21 @@ def test_context_refuses_missing_completed_or_ambiguous_calls(calls):
     client.get.return_value.json.return_value = [{"calls": calls}]
     with pytest.raises(RuntimeError, match="fresh backend call"):
         context(client, "synthetic-call")
+
+
+def test_disclosure_check_uses_spoken_vendor_opening_without_returning_text():
+    checks = conversation_checks({"transcript": [
+        {"role": "agent", "message": "Hi, I'm an AI assistant calling for a patient.", "interrupted": False},
+        {"role": "user", "message": "Synthetic receptionist line"},
+        {"role": "agent", "message": "What does a cleaning cost?", "interrupted": True},
+    ], "has_audio": False})
+    assert checks == {"opening_discloses_ai": True, "interrupted_agent_turns": 1,
+                      "repeated_agent_lines": 0, "stored_audio": False}
+    assert "Synthetic" not in str(checks) and "cleaning" not in str(checks)
+
+
+def test_conversation_checks_report_missing_disclosure_and_audio_storage():
+    checks = conversation_checks({"transcript": [{"role": "agent", "message": "Hello"}],
+                                  "has_user_audio": True})
+    assert checks["opening_discloses_ai"] is False
+    assert checks["stored_audio"] is True

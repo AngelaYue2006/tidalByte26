@@ -46,6 +46,19 @@ def spec_for(task, call, destination):
                     call_id=call["call_id"])
 
 
+def conversation_checks(data):
+    """Summarize vendor delivery without returning any transcript text."""
+    agents = [line for line in data.get("transcript", []) if line.get("role") == "agent"]
+    texts = [line.get("message") or "" for line in agents]
+    return {
+        "opening_discloses_ai": bool(texts and texts[0].startswith(OPENING_LINE)),
+        "interrupted_agent_turns": sum(bool(line.get("interrupted")) for line in agents),
+        "repeated_agent_lines": len(texts) - len(set(texts)),
+        "stored_audio": any(data.get(key) for key in (
+            "has_audio", "has_user_audio", "has_response_audio", "has_auxiliary_audio")),
+    }
+
+
 def run(args):
     if args.env_file.name != ".env" or not args.env_file.is_file():
         raise RuntimeError("Provide the existing ignored .env")
@@ -117,10 +130,15 @@ def run(args):
             if lines and results:
                 break
             time.sleep(2)
-        agents = [line for line in lines if line.get("speaker") == "agent"]
+        with elevenlabs_api.ElevenLabsClient() as vendor:
+            checks = conversation_checks(vendor.request("GET", "conversations/" + handle.external_ref))
         print("Backend transcript events:", len(lines), "call_result events:", len(results))
-        print("First agent line discloses AI:", bool(agents and agents[0]["text"].startswith(OPENING_LINE)))
-        return 0 if lines and len(results) == 1 and agents and agents[0]["text"].startswith(OPENING_LINE) else 1
+        print("Vendor conversation checks:", checks)
+        # The configured opening is spoken by ElevenLabs, before the proxy's first
+        # generated reply. Check the actual vendor transcript for that disclosure.
+        return 0 if (lines and len(results) == 1 and checks["opening_discloses_ai"]
+                     and not checks["stored_audio"]) else 1
+
 
 
 def main():

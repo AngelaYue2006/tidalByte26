@@ -314,3 +314,9 @@ receipt/status/count/disclosure checks, never phone numbers or transcript text.
 No audio is fetched or stored; the adapter's recording-off preflight still runs.
 An accepted dial is not a booking or proof of a complete offer. The command
 succeeds only when transcript events and one structured call_result arrive.
+
+The configured opening is spoken directly by ElevenLabs before the first proxy
+reply. The smoke harness verifies disclosure against the vendor text transcript,
+not the first backend-recorded generated reply. It reports only booleans/counts,
+including interrupted turns and audio-storage flags. A hard duration limit may
+cut off a closing sentence; finish the demo exchange before the cutoff.
