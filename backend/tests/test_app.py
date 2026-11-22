@@ -59,6 +59,31 @@ def test_create_app_refuses_live_mode_with_missing_values():
         create_app(load_settings(env_file=None, environ={**ENV, "VOICE_MODE": "live"}))
 
 
+def test_create_app_starts_in_live_mode_when_every_value_is_set(monkeypatch):
+    """#115: VOICE_MODE=live constructs the live bridge; no network (start_call patched)."""
+    from app.adapters import VoiceLiveBridge
+    from integrations.types import CallHandle
+
+    monkeypatch.setattr(
+        "integrations.voice_elevenlabs.start_call",
+        lambda spec: CallHandle(call_id=spec.call_id, external_ref="conv", simulated=False),
+    )
+    live_env = {
+        **ENV,
+        "VOICE_MODE": "live",
+        "NEMOTRON_LIGHTNING_ID": "nvidia/lightning-test",
+        "ELEVENLABS_API_KEY": "x",
+        "ELEVENLABS_AGENT_ID": "x",
+        "ELEVENLABS_PHONE_NUMBER_ID": "x",
+        "ELEVENLABS_WEBHOOK_SECRET": "x",
+        "LLM_PROXY_SECRET": "x",
+        "TWILIO_PHONE_NUMBER": "+15555550000",
+    }
+    app = create_app(load_settings(env_file=None, environ=live_env))
+    assert isinstance(app.state.pipeline.deps.voice, VoiceLiveBridge)
+    assert app.state.pipeline.deps.voice.live is True
+
+
 def test_app_loggers_reach_a_handler_under_a_bare_server():
     """uvicorn configures only its own loggers; create_app gives the root logger a handler so the webhook evidence lines are not dropped."""
     import logging

@@ -34,6 +34,7 @@ LIVE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
         "LLM_PROXY_SECRET",
         "PUBLIC_BASE_URL",
         "DEMO_PHONE_ALLOWLIST",
+        "TWILIO_PHONE_NUMBER",
     ),
     "sms": (
         "TWILIO_ACCOUNT_SID",
@@ -61,6 +62,7 @@ class Settings(BaseModel):
     app_env: str = "development"
     app_timezone: str = "America/Chicago"
     approval_timeout_min: float = 10.0  # one reminder SMS after this; then the task keeps waiting (T6)
+    call_result_timeout_s: float = 180.0  # live voice: wait for post-call results before ranking (#116)
     database_url: str = "sqlite:///./lifeline.db"
     public_base_url: str | None = None
     llm_proxy_secret: str | None = None

@@ -28,7 +28,9 @@ from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
 
-from integrations.types import CallSpec, Confirmation, Offer
+from integrations.types import CallHandle, CallSpec, Confirmation, Offer
+
+PROXY_SECRET = "scenario-llm-proxy-secret-0123456789abcdef"
 
 REPO = Path(__file__).resolve().parents[2]
 SHARED = REPO / "shared"
@@ -206,7 +208,38 @@ class Outbound:
         return self.target in CLOUD_TARGETS
 
 
-CLOUD_TARGETS = frozenset({"find_clinics", "drive", "rank", "voice.call_clinics"})
+CLOUD_TARGETS = frozenset({"find_clinics", "drive", "rank", "voice.call_clinics", "voice.start_call"})
+
+# Post-call data-collection values that parse to the same slots as receptionists.json (T13).
+LIVE_COLLECTIONS = {
+    BRIGHT: {"price": {"value": "$95", "rationale": "said"}, "slot": "Thu 9:30", "insured": "yes"},
+    SMILE: {"price": {"value": "$120", "rationale": "said"}, "slot": "Fri 4:00", "insured": "yes"},
+    OAK: {"price": {"value": "$140", "rationale": "said"}, "slot": "next Monday 10:00", "insured": "yes"},
+}
+
+
+@dataclass
+class LiveScenarioVoice:
+    """VOICE_MODE=live stand-in: records start_call (call_id + proxy secret); booking confirm stays FixtureReplay."""
+
+    live: bool = True
+    proxy_secret: str = PROXY_SECRET
+    starts: list[dict] = field(default_factory=list)
+    confirmed: list[str] = field(default_factory=list)
+    specs: list[CallSpec] = field(default_factory=list)
+    _replay: FixtureReplay = field(default_factory=FixtureReplay, repr=False)
+
+    def start_call(self, spec: CallSpec) -> CallHandle:
+        self.specs.append(spec)
+        self.starts.append({"call_id": spec.call_id, "proxy_secret": self.proxy_secret})
+        return CallHandle(call_id=spec.call_id, external_ref=f"conv-{spec.call_id}", simulated=False)
+
+    async def call_clinics(self, specs, on_event):
+        raise RuntimeError("VOICE_MODE=live: orchestrator starts calls and waits for post-call results")
+
+    def confirm_booking(self, spec: CallSpec, slot: dict) -> Confirmation:
+        self.confirmed.append(spec.call_id)
+        return self._replay.confirm_booking(spec, slot)
 
 
 class Lab:
@@ -393,6 +426,22 @@ def make_lab(monkeypatch, root: Path, *, voice: ScenarioVoice | None = None, nan
     return lab
 
 
+def make_live_lab(monkeypatch, root: Path, *, nano: FakeNano | None = None, env: dict | None = None) -> Lab:
+    """Same as make_lab but with a fake live voice adapter: start_call only; results arrive via signed post-call webhooks."""
+    voice = LiveScenarioVoice(proxy_secret=PROXY_SECRET)
+    return make_lab(
+        monkeypatch,
+        root,
+        voice=voice,  # type: ignore[arg-type]
+        nano=nano,
+        env={
+            "LLM_PROXY_SECRET": PROXY_SECRET,
+            "CALL_RESULT_TIMEOUT_S": "30",
+            **(env or {}),
+        },
+    )
+
+
 def _wire_recorders(lab: Lab, deps: Deps) -> None:
     def record(target: str, fn):
         def wrapped(*args, **kwargs):
@@ -418,13 +467,22 @@ def _wire_recorders(lab: Lab, deps: Deps) -> None:
     deps.transport_check = record("transport_check", deps.transport_check)
     real_rank = lab.ranker.complete_json
     lab.ranker.complete_json = record("rank", real_rank)
-    real_call = lab.voice.call_clinics
+    if getattr(lab.voice, "live", False):
+        real_start = lab.voice.start_call
 
-    async def call_clinics(specs, on_event):
-        lab.outbound.append(Outbound("voice.call_clinics", json.dumps([s.model_dump(mode="json") for s in specs], ensure_ascii=False)))
-        return await real_call(specs, on_event)
+        def start_call(spec):
+            lab.outbound.append(Outbound("voice.start_call", json.dumps(spec.model_dump(mode="json"), ensure_ascii=False)))
+            return real_start(spec)
 
-    lab.voice.call_clinics = call_clinics
+        lab.voice.start_call = start_call
+    else:
+        real_call = lab.voice.call_clinics
+
+        async def call_clinics(specs, on_event):
+            lab.outbound.append(Outbound("voice.call_clinics", json.dumps([s.model_dump(mode="json") for s in specs], ensure_ascii=False)))
+            return await real_call(specs, on_event)
+
+        lab.voice.call_clinics = call_clinics
 
 
 def _plain(value):

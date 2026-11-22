@@ -20,7 +20,7 @@ from integrations import (
     sms_twilio,
     transport_sim,
 )
-from integrations.types import CallSpec, Confirmation, Offer
+from integrations.types import CallHandle, CallSpec, Confirmation, Offer
 
 OnEvent = Callable[[dict], Any]
 
@@ -45,6 +45,8 @@ class VoiceMockBridge:
     receptionists.json. Either way every event is simulated and nothing is dialled. `sleep` lets tests run the
     fixture timing instantly; the app uses the real clock.
     """
+
+    live = False
 
     def __init__(self, sleep=None) -> None:
         self._sleep = sleep
@@ -76,6 +78,34 @@ class VoiceMockBridge:
         return simulator.confirm_booking(spec, slot)
 
 
+class VoiceLiveBridge:
+    """VOICE_MODE=live: ElevenLabs `start_call`; booking confirm stays on the mock path (`simulated: true`).
+
+    The orchestrator starts each call and waits for post-call webhooks; `call_clinics` is not used in live mode.
+    """
+
+    live = True
+
+    def __init__(
+        self,
+        start_call: Callable[[CallSpec], CallHandle],
+        confirm_booking: Callable[[CallSpec, dict], Confirmation],
+    ) -> None:
+        self._start_call = start_call
+        self._confirm_booking = confirm_booking
+
+    def start_call(self, spec: CallSpec) -> CallHandle:
+        return self._start_call(spec)
+
+    async def call_clinics(self, specs: list[CallSpec], on_event: OnEvent) -> list[Offer]:
+        raise RuntimeError(
+            "VOICE_MODE=live: the orchestrator starts calls and waits for post-call results"
+        )
+
+    def confirm_booking(self, spec: CallSpec, slot: dict) -> Confirmation:
+        return self._confirm_booking(spec, slot)
+
+
 @dataclass
 class Deps:
     free_windows: Callable = google_calendar.free_windows
@@ -89,6 +119,7 @@ class Deps:
     intake_model: Callable[[], local_intake.IntakeModel] = local_intake.from_env
     rank_client: Callable[[], ranker.ChatJSON] = lambda: _missing("NVIDIA_API_KEY and NEMOTRON_SUPER_ID")
     now: Callable | None = None  # tests pin the clock
+    call_result_timeout_s: float = 180.0
 
 
 def _missing(what: str):
@@ -97,8 +128,32 @@ def _missing(what: str):
 
 def build_deps(settings: Settings) -> Deps:
     deps = Deps()
-    if settings.voice_mode != "mock":
-        raise RuntimeError("VOICE_MODE=live is #26's work; this pipeline runs with VOICE_MODE=mock")
+    deps.call_result_timeout_s = float(getattr(settings, "call_result_timeout_s", 180.0) or 180.0)
+
+    if settings.voice_mode == "live":
+        # Fail closed at startup with readable names (same set as LIVE_REQUIREMENTS["voice"] plus Twilio number).
+        settings.require(
+            "NVIDIA_API_KEY",
+            "NEMOTRON_LIGHTNING_ID",
+            "ELEVENLABS_API_KEY",
+            "ELEVENLABS_AGENT_ID",
+            "ELEVENLABS_PHONE_NUMBER_ID",
+            "ELEVENLABS_WEBHOOK_SECRET",
+            "LLM_PROXY_SECRET",
+            "PUBLIC_BASE_URL",
+            "DEMO_PHONE_ALLOWLIST",
+            "TWILIO_PHONE_NUMBER",
+        )
+        from integrations import voice_elevenlabs
+
+        # Booking confirm stays on the fixture/mock path (simulated); live confirm_booking is unwired.
+        replay = FixtureReplay()
+        deps.voice = VoiceLiveBridge(
+            start_call=voice_elevenlabs.start_call,
+            confirm_booking=replay.confirm_booking,
+        )
+    elif settings.voice_mode != "mock":
+        raise RuntimeError(f"VOICE_MODE must be mock or live, got {settings.voice_mode!r}")
 
     def rank_client() -> ranker.ChatJSON:
         return ranker.NvidiaChatClient(settings.nvidia_api_key or "", settings.require_model("super"))

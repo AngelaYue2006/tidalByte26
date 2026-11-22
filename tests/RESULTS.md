@@ -4,8 +4,8 @@
 **Command:** `pytest -q tests/` from the repo root in the shared venv; `scripts/check.sh` ran the same files with the
 backend and integrations suites. Every adapter in mock mode; the only socket connect allowed is to a loopback port this process bound itself (asyncio on Windows), so nothing left the machine. Inbound SMS is mock form handling without a Twilio signature; the ElevenLabs post-call replay is signed.
 
-**Summary:** 54 passed, nothing skipped or expected to fail (23 scenario tests, all green). Pass means the scenario's
-expected result from `docs/MVP.md` holds against the merged backend.
+**Summary:** Scenario suite plus T13 (live-mode fake adapter). Pass means the scenario's expected result from
+`docs/MVP.md` holds against the merged backend.
 
 | ID | Scenario | Test | Result | Note |
 |---|---|---|---|---|
@@ -21,4 +21,5 @@ expected result from `docs/MVP.md` holds against the merged backend.
 | T10 | Contact declines | `T10_contact_declines.py` (2 tests) | pass | Dashboard decline keeps `awaiting_contact`: `contact_reply` for both roles plus an owner-only `CONTACT_DECLINED` note in one transaction, no `ride_confirmed`; a later offer completes once. SMS `NO` through the signed webhook does the same and keeps waiting; a later `YES` confirms once (#23) |
 | T11 | Dashboard refresh mid-call | `T11_refresh_snapshot.py` | pass | Snapshot mid-call restores two finished cards, the live card and its transcripts; the reconnect sends only ids above the snapshot cursor; snapshot plus stream equals the persisted trail once |
 | T12 | Two runs then reset | `T12_two_runs_reset.py` (2 tests) | pass | Two full runs, both `completed`, history newest first for both roles, no shared ids or receipts. `POST /api/demo/reset` stops pipelines, wipes every table, reseeds the contact and two simulated past runs (old ids answer 404, the snapshot shows the newest seeded run), a third run completes; 403 outside development |
+| T13 | Live mode with fake adapter | `T13_live_mode_fake_adapter.py` | pass | `VOICE_MODE=live` path: three `start_call` with call id + proxy secret, three signed post-call webhooks, `simulated: false` on live statuses, approval → mock booking → contact → `completed` (#115–#117) |
 

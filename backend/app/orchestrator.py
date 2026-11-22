@@ -78,6 +78,7 @@ class Run:
     offers: list[Offer] | None = None
     winner: Offer | None = None
     booking: Booking | None = None
+    drive_min_by_call: dict[str, float] = field(default_factory=dict)  # call id -> drive minutes from places (not stored on Call)
     proxy_specs: dict = field(default_factory=dict)  # call id -> the recorder's CallSpec, loaded once per call
     transcript_seq: dict[str, int] = field(default_factory=dict)  # call id -> last seq given to a line that arrived without one
 
@@ -220,6 +221,7 @@ class Pipeline:
                 call_id = f"{run.task_id[:8]}-{letter}"
                 distance = distances.get(clinic.place_id)
                 run.specs[call_id] = CallSpec(clinic=clinic, request=wire_request, windows=run.windows, call_id=call_id)
+                run.drive_min_by_call[call_id] = float(distance.minutes) if distance else 0.0
                 session.add(Call(id=call_id, task_id=run.task_id, clinic_name=clinic.name, clinic_phone=clinic.phone_e164,
                                  distance_mi=distance.miles if distance else None, status="dialing", started_at=datetime.now(UTC)))
         for call_id, spec in run.specs.items():
@@ -229,10 +231,121 @@ class Pipeline:
 
     async def _calling(self, run: Run) -> None:
         self._set_status(run, "calling")
+        if getattr(self.deps.voice, "live", False):
+            await self._calling_live(run)
+            return
         offers = await self.deps.voice.call_clinics(list(run.specs.values()), lambda event: self._voice_event(run, event))
         run.offers = list(offers)
         if not run.offers:
             raise PipelineFailure("CALL_FAILED", "No clinic call produced an offer.")
+
+    async def _calling_live(self, run: Run) -> None:
+        """VOICE_MODE=live: start one ElevenLabs call per clinic, wait for post-call results (or timeout), then build offers."""
+        assert run.specs is not None
+        voice = self.deps.voice
+        for call_id, spec in run.specs.items():
+            handle = await asyncio.to_thread(voice.start_call, spec)
+            with session_scope(self.engine) as session:
+                call = session.get(Call, call_id)
+                if call is not None:
+                    call.external_ref = handle.external_ref
+                    call.status = "live"
+            self._emit(
+                run,
+                "call_status",
+                {"call_id": call_id, "status": "live", "simulated": bool(handle.simulated)},
+                "contact",
+            )
+
+        timeout_s = float(getattr(self.deps, "call_result_timeout_s", 180.0) or 180.0)
+        await self._wait_until_calls_done(run.task_id, list(run.specs), timeout_s)
+
+        for call_id in self._calls_without_result(list(run.specs)):
+            with session_scope(self.engine) as session:
+                call = session.get(Call, call_id)
+                if call is not None and not call.result_json:
+                    call.status = "done"
+                    call.result_json = json.dumps({"error": "CALL_FAILED", "reason": "CALL_TIMEOUT"})
+                    call.ended_at = datetime.now(UTC)
+            self._emit(
+                run,
+                "call_status",
+                {"call_id": call_id, "status": "done", "error": "CALL_FAILED", "reason": "CALL_TIMEOUT"},
+                "contact",
+            )
+
+        run.offers = self._offers_from_call_rows(run)
+        if not run.offers:
+            raise PipelineFailure("NO_ELIGIBLE_OFFER", "No clinic call produced an eligible offer.")
+
+    def _calls_without_result(self, call_ids: list[str]) -> list[str]:
+        missing: list[str] = []
+        with Session(self.engine) as session:
+            for call_id in call_ids:
+                call = session.get(Call, call_id)
+                if call is None or not call.result_json:
+                    missing.append(call_id)
+        return missing
+
+    @staticmethod
+    def _row_has_offer(result_json: str | None) -> bool:
+        if not result_json:
+            return False
+        try:
+            data = json.loads(result_json)
+        except json.JSONDecodeError:
+            return False
+        if data.get("error"):
+            return False
+        return bool(data.get("slot_start") and data.get("price_usd") is not None and data.get("slot_end"))
+
+    def _offers_from_call_rows(self, run: Run) -> list[Offer]:
+        assert run.specs is not None
+        offers: list[Offer] = []
+        with Session(self.engine) as session:
+            for call_id, spec in run.specs.items():
+                call = session.get(Call, call_id)
+                if call is None or not self._row_has_offer(call.result_json):
+                    continue
+                data = json.loads(call.result_json or "{}")
+                miles = float(call.distance_mi or 0.0)
+                offers.append(
+                    Offer(
+                        call_id=call_id,
+                        clinic=spec.clinic.name,
+                        price=float(data["price_usd"]),
+                        slot_start=datetime.fromisoformat(data["slot_start"]),
+                        slot_end=datetime.fromisoformat(data["slot_end"]),
+                        insured=bool(data.get("insured")),
+                        distance_mi=miles,
+                        drive_min=float(run.drive_min_by_call.get(call_id, 0.0)),
+                    )
+                )
+        return offers
+
+    async def _wait_until_calls_done(self, task_id: str, call_ids: list[str], timeout_s: float) -> bool:
+        """Wake on each post-call resume until every call has a terminal result_json, or the timeout elapses."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+        event = self._waits.setdefault(task_id, asyncio.Event())
+        try:
+            while True:
+                if not self._calls_without_result(call_ids):
+                    return True
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    return False
+                event.clear()
+                # Re-check after clear so a resume that raced the clear is not lost.
+                if not self._calls_without_result(call_ids):
+                    return True
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=remaining)
+                except TimeoutError:
+                    return False
+        finally:
+            self._waits.pop(task_id, None)
+            self._claimed.discard(task_id)
 
     def _voice_event(self, run: Run, event: dict) -> None:
         """A `call_status`, `transcript` or `call_result` payload from the voice adapter: record the fact, then emit.

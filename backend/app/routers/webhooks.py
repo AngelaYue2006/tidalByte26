@@ -144,14 +144,18 @@ def process_post_call(engine: Engine, bus: EventBus, settings: Settings, payload
         return {"ok": False, "ignored": "unknown_conversation"}
     call, task = found
     if payload.get("type") == "call_initiation_failure":
-        return call_results.record_call_failure(engine, bus, call, task, str(data.get("failure_reason") or "unknown"))
+        outcome = call_results.record_call_failure(engine, bus, call, task, str(data.get("failure_reason") or "unknown"))
+        outcome["task_id"] = task.id
+        return outcome
     collection = (data.get("analysis") or {}).get("data_collection_results") or {}
     stamp = payload.get("event_timestamp")
     call_date = datetime.fromtimestamp(int(stamp), UTC) if isinstance(stamp, int | float) else datetime.now(UTC)
-    return call_results.record_call_result(
+    outcome = call_results.record_call_result(
         engine, bus, call, task, collection, transcript_lines(data),
         call_date=call_date, timezone=settings.app_timezone, super_client=client,
     )
+    outcome["task_id"] = task.id
+    return outcome
 
 
 @router.post("/elevenlabs/post-call")
@@ -176,6 +180,14 @@ async def elevenlabs_post_call(request: Request) -> dict:
     except Exception as exc:  # anything not committed: say so, ElevenLabs retries, the claim keeps the retry safe
         log.exception("post-call webhook processing failed; asking for a retry")
         raise HTTPException(500, "post-call processing failed; retry") from exc
+    # Live calling waits on resume (#116). Never wake approval/contact waits; drop task_id from the HTTP body.
+    task_id = outcome.pop("task_id", None)
+    if task_id and not outcome.get("duplicate"):
+        with Session(request.app.state.engine) as session:
+            task = session.get(Task, task_id)
+            status = task.status if task is not None else None
+        if status == "calling":
+            request.app.state.pipeline.resume(task_id)
     return {"ok": True, "accepted": payload["type"], **outcome}
 
 def _waiting_task(engine, owner_id: str, correlation: str | None) -> Task | None:

@@ -52,7 +52,7 @@ Deterministic, in this order. Each step writes an event; the task status is the 
 
 2. `calendar` — `calendar.free_windows()` for the requested range.
 3. `places` — `places.find_clinics()` top 3, then `distance.drive()` from the owner's home. Emit `call_start` ×3 with distance meta.
-4. `calling` — `voice.start_call()` ×3 in parallel. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`. Mock and simulator lines take the same recorder (`llm_proxy.record_turn`, one `turns` row and one `transcript` event per `(call_id, seq)`), labelled `simulated: true`.
+4. `calling` — `VOICE_MODE=mock`: `voice.call_clinics()` replays the scripted receptionists and returns offers. `VOICE_MODE=live`: `voice.start_call()` ×3 (ElevenLabs), store each `external_ref`, then wait (same resume pattern as approval) until every call row has `result_json` from the post-call webhook, or `CALL_RESULT_TIMEOUT_S` (default 180) marks the rest `CALL_TIMEOUT`; offers are built from the rows. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`. Mock and simulator lines take the same recorder (`llm_proxy.record_turn`, one `turns` row and one `transcript` event per `(call_id, seq)`), labelled `simulated: true`.
 5. `ranking` — `ranking.hard_rules()` drops offers over budget, outside free windows, or not insured. `ranker.rank()` (Super) scores the rest. Emit `decision`. If nothing survives, status `failed` with reason, emit `task_updated`, notify both, stop.
 6. `awaiting_approval` — SMS the owner the pick. Emit `approval_required`. Wait for `POST /api/tasks/{id}/approve` or SMS `YES`. Timeout: one reminder, then stay waiting.
 7. `booking` — `voice.confirm_booking()` (a short call-back, or the mock) returns `Confirmation`. Only on `confirmed`: `calendar.create_event()` once, keyed by task id. Emit `booked`. On `tentative`: emit `booked` with `tentative: true` and no calendar event.
@@ -190,7 +190,8 @@ GOOGLE_CLIENT_SECRET=
 GOOGLE_REFRESH_TOKEN=       # one test account
 GOOGLE_MAPS_API_KEY=        # Places + Routes API
 DEMO_PHONE_ALLOWLIST=       # comma-separated teammate numbers, E.164
-VOICE_MODE=mock             # mock | live
+VOICE_MODE=mock             # mock | live (live wires ElevenLabs start_call; booking confirm stays mock)
+CALL_RESULT_TIMEOUT_S=180   # live voice: seconds to wait for post-call results before ranking
 PLACES_MODE=fixture         # fixture | live
 CALENDAR_MODE=mock          # mock | live
 SMS_MODE=mock               # mock | live
