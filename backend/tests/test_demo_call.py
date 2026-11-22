@@ -69,6 +69,11 @@ def test_target_number_refuses_fixture_numbers_and_off_list_entries(settings):
 
 def test_database_url_resolves_a_relative_sqlite_path_against_backend(settings):
     url = demo_call.database_url(settings.model_copy(update={"database_url": "sqlite:///./lifeline.db"}))
-    assert url.startswith("sqlite:////") and url.endswith("/backend/lifeline.db")
+    assert url == "sqlite:///" + (demo_call.ROOT / "backend" / "lifeline.db").resolve().as_posix()
     absolute = "sqlite:////tmp/x.db"
     assert demo_call.database_url(settings.model_copy(update={"database_url": absolute})) == absolute
+
+
+@pytest.mark.parametrize("url", ["sqlite:///C:/demo/lifeline.db", "sqlite:///:memory:"])
+def test_database_url_preserves_absolute_windows_paths_and_memory(settings, url):
+    assert demo_call.database_url(settings.model_copy(update={"database_url": url})) == url

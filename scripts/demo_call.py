@@ -20,7 +20,7 @@ import sys
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,9 +51,11 @@ def database_url(settings: Settings) -> str:
     """The backend's own database. A relative sqlite path in .env is relative to backend/, where uvicorn runs."""
     url = settings.database_url
     prefix = "sqlite:///"
-    if url.startswith(prefix) and not url.startswith("sqlite:////"):
+    if url.startswith(prefix):
         relative = url[len(prefix):].removeprefix("./")
-        return f"sqlite:///{(ROOT / 'backend' / relative).resolve()}"
+        if relative == ":memory:" or Path(relative).is_absolute() or PureWindowsPath(relative).is_absolute():
+            return url
+        return f"sqlite:///{(ROOT / 'backend' / relative).resolve().as_posix()}"
     return url
 
 
