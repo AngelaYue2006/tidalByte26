@@ -154,6 +154,78 @@ Vendor references: [Text Search](https://developers.google.com/maps/documentatio
 [Place Details](https://developers.google.com/maps/documentation/places/web-service/place-details),
 [computeRoutes](https://developers.google.com/maps/documentation/routes/reference/rest/v2/TopLevel/computeRoutes).
 
+
+## ElevenLabs outbound voice (#26)
+
+`voice_elevenlabs.start_call(CallSpec) -> CallHandle` starts an outbound discovery
+call in `VOICE_MODE=live`. It allowlists the destination before client creation
+and again after read-only settings checks, immediately before the POST. The
+backend must create the task/call rows before dialing (the proxy loads redacted
+context by call_id), store `external_ref` from the returned conversation ID and
+skip calls with a persisted receipt. A vendor acceptance is not a completed call,
+Offer, booking or proof of dashboard delivery. Ambiguous POST failures are not
+retried automatically; reconcile before any resubmission.
+
+The adapter sends clinic name, care type, optional budget/carrier and ISO windows
+as scalar dynamic variables. It sends call_id and LLM_PROXY_SECRET in
+`custom_llm_extra_body`, not dynamic variables. It never sends the owner's record,
+clinic street address, dropped field names/values or raw intake. No model ID is
+hard-coded. The configured agent must use the expected PUBLIC_BASE_URL proxy.
+
+Before every dial, GET checks require the agent's first message to begin with
+`Hi, I'm an AI assistant calling for a patient.`, privacy.record_voice=false,
+Custom LLM extra body enabled, and only transcript/call-failure webhook events.
+The imported number must be Twilio, support outbound calls and be assigned to the
+configured agent. The POST also sets call_recording_enabled=false. Nothing calls
+an audio endpoint or stores audio. No settings are changed automatically. Errors
+omit credentials, vendor messages and bodies; HTTP requests have bounded timeouts
+and no redirects/retries. A changed/incomplete API configuration fails closed.
+Webhook destination/secret correctness still requires the actual signed round
+trip; settings presence alone is not that proof.
+
+`VOICE_MODE=mock` delegates to the merged `voice_mock` adapter, using its
+backend-owned callback lifecycle and synthetic fixtures. Bind callbacks before
+starting a mock call; calls outside that lifecycle fail before network access.
+Unknown modes also fail.
+
+**Backend work needed:** main's build_deps still rejects VOICE_MODE=live. Joyce
+must wire live starts off the server event loop, persist external_ref, wait for
+the signed webhook's structured results and feed those facts into the pipeline.
+Three starts may run concurrently; the fake-HTTP regression proves no adapter
+serialization. The documented workspace limit is four, but a real three-call
+run and current plan/minute availability have not been verified here.
+
+`confirm_booking(CallSpec, slot) -> Confirmation` retains its signature but fails
+before dialing in live mode. The current proxy prompt explicitly forbids booking
+and its CallSpec has no approved booking intent/slot context. Joyce must add an
+approval-aware booking flow and structured confirmation evidence before this
+adapter can safely implement it; transcript wording is never a confirmation
+receipt. The synchronous backend booking call must also run off the server loop.
+Mock confirmation delegates to #13 and remains explicitly simulated.
+
+Required existing settings: ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID,
+ELEVENLABS_PHONE_NUMBER_ID, ELEVENLABS_WEBHOOK_SECRET, LLM_PROXY_SECRET,
+PUBLIC_BASE_URL, and DEMO_PHONE_ALLOWLIST. `python-dotenv` is declared for the
+read-only helper:
+
+`python -m integrations.elevenlabs_preflight --env-file ../lifeline-6/.env`
+
+Account setup (#67) is complete and the local safety preflight passes. The
+successful live adapter test completed naturally in 94 seconds, produced 12
+backend transcript events and one structured call_result, verified the spoken AI
+disclosure, and reported no stored audio or interrupted agent turns. No real
+booking or calendar write was made. The exact command and sanitized outcome are
+in PR #84, ready for review under the coordinator's one-call scope decision.
+
+Three simultaneous real calls or a documented plan-limit stagger remain
+undemonstrated. Live confirm_booking still fails closed pending backend-owned
+approved booking context and structured confirmation evidence. The successful
+single-call test does not claim the entire live pipeline or booking is complete.
+
+Vendor references: [Outbound call](https://elevenlabs.io/docs/api-reference/integrations/twilio/outbound-call),
+[Agent settings](https://elevenlabs.io/docs/api-reference/agents/get),
+[Imported number](https://elevenlabs.io/docs/api-reference/phone-numbers/get).
+
 ## Scripted receptionists (#13)
 
 The mock keeps `voice_mock.start_call(call: CallSpec) -> CallHandle` and
@@ -290,3 +362,37 @@ cannot supply trusted signature or role context. The new-style trial's classic
 IncomingPhoneNumbers lookup result is not an outstanding #27 acceptance blocker:
 Joyce's delivered/received evidence and its limitations are recorded in #7/PR #79.
 The optional live outbound sender check remains strict; the demo keeps it off.
+
+
+### One-call live acceptance command
+
+Only after the backend owner prepares a fresh synthetic task/call with no result,
+use `python -m integrations.elevenlabs_smoke --env-file ../lifeline-6/.env
+--call-id <prepared-call-id> --allowlist-index <one-based-authorized-entry>`.
+This is an explicitly live command, independent of the file's VOICE_MODE. It
+uses the backend's redacted intake and windows and replaces only the fixture
+clinic phone with the explicitly selected allowlisted teammate destination.
+It refuses unknown clinics, missing/ambiguous contexts and already completed
+calls. Never reuse a context after a partially successful or ambiguous dial.
+
+The test checks Twilio read access before dialing, captures only this dial's
+call-control receipt, and allows natural termination and schedules a fallback hangup after 250 seconds. It rechecks the
+actual Twilio destination before call control. The teammate should also hang up
+at the 250-second safety limit if call control reports a failure. Output contains only
+receipt/status/count/disclosure checks, never phone numbers or transcript text.
+No audio is fetched or stored; the adapter's recording-off preflight still runs.
+An accepted dial is not a booking or proof of a complete offer. The command
+succeeds only when transcript events and one structured call_result arrive.
+
+The configured opening is spoken directly by ElevenLabs before the first proxy
+reply. The smoke harness verifies disclosure against the vendor text transcript,
+not the first backend-recorded generated reply. It reports only booleans/counts,
+including interrupted turns and audio-storage flags. A hard duration limit may
+cut off a closing sentence; finish the demo exchange before the cutoff.
+
+The 250-second timer is a safety cap, not the normal conversation endpoint.
+The harness polls this dial's Twilio receipt and cancels the timer immediately
+when the call ends naturally. It reports whether it forced a hangup so a cutoff
+cannot be mistaken for a natural farewell. Earlier 40/60-second live trials are
+historical evidence only; the collection-configuration inference from an
+incomplete API field check was withdrawn in PR #84.
