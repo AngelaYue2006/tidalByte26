@@ -122,7 +122,7 @@ export default function SimpleLiveFlow({ state, viewer, taskId, demo, error }: {
       return (
         <main className="simple-main">
           <SimplePanel stage="request" title="Waiting for Mary">
-            <p>Mary has a question to answer in her view before LifeLine calls clinics.</p>
+            <p>Mary has a question to answer in her view before GranniAI calls clinics.</p>
           </SimplePanel>
         </main>
       );
@@ -175,7 +175,7 @@ export default function SimpleLiveFlow({ state, viewer, taskId, demo, error }: {
         <p role="status">Checking the clinic offers for your appointment.</p>}
       {ride}
     </SimplePanel> : <SimplePanel stage="calls" title={contact ? "Mary’s request is in" : "Your request is in"}>
-      <p>LifeLine is checking clinics. You can watch the agents or wait here.</p>
+      <p>GranniAI is checking clinics. You can watch the agents or wait here.</p>
       <button className="primary-action" onClick={() => setWatch(true)}><IconPhone/>Watch the agents</button>{ride}
     </SimplePanel>}
     {error && !demo && <p role="status" className="muted">{error}</p>}

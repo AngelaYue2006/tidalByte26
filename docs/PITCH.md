@@ -1,6 +1,6 @@
-# LifeLine — Pitch
+# GranniAI — Pitch
 
-Demo script, Devpost copy, and the Nemotron track explanation. Measured numbers (redaction accuracy, latencies, time-to-booked) are filled by backend issue **#25** (`app/metrics.py` → `metrics.jsonl` → `scripts/metrics_summary.py`) when that lands. Until then the metrics table below stays pending — do not invent a LifeLine wall-clock from the prototype replay.
+Demo script, Devpost copy, and the Nemotron track explanation. Measured numbers (redaction accuracy, latencies, time-to-booked) are filled by backend issue **#25** (`app/metrics.py` → `metrics.jsonl` → `scripts/metrics_summary.py`) when that lands. Until then the metrics table below stays pending — do not invent a GranniAI wall-clock from the prototype replay.
 
 ## What is simulated (say this plainly)
 
@@ -25,7 +25,7 @@ From `docs/MVP.md`. Total ≈ 175 s; leave a few seconds of slack.
 4. **Decision (20 s):** “Why Nemotron picked Bright Smile Dental” — reason tags plus the trade-off sentence (Smile Co. closer, wrong free window).
 5. **Approve (10 s):** Mary’s phone buzzes with the pick; tap **Approve**. Booking confirmed; calendar event appears.
 6. **Ride (30 s):** Transport check shows **No accessible ride found (simulated)**. Sarah’s phone buzzes. She replies “I can drive her.” Dashboard shows the ride confirmed.
-7. **Close (20 s):** Final texts land; history shows the run. **End on the number:** time to a booked appointment with LifeLine versus calling three clinics yourself — paste the live comparison from #25’s summary once measured. Until then, close on the privacy beat (raw text never leaves the device) and the one-approval story.
+7. **Close (20 s):** Final texts land; history shows the run. **End on the number:** time to a booked appointment with GranniAI versus calling three clinics yourself — paste the live comparison from #25’s summary once measured. Until then, close on the privacy beat (raw text never leaves the device) and the one-approval story.
 
 **Backup:** `frontend/prototype/index.html` replays the same events with synthesized clinic voices; keep a screen recording of a full live run. The prototype’s scripted `at:` timestamps are demo pacing, not a system measurement.
 
@@ -55,7 +55,7 @@ Demo beat: Wi-Fi off → speak → chips with **Processed on device** → Wi-Fi 
 
 ### Measured numbers (pending #25)
 
-Filled by `python scripts/metrics_summary.py` after backend **#25** lands. Paste the script output here and into Devpost. Rows stay pending until then — including time-to-booked for LifeLine. A desk stopwatch of three sequential mock clinic dialogues (no LifeLine) was **201.5 s** on 2026-11-21; that is a manual baseline only. The LifeLine side is **not yet measured** (do not use the prototype’s 15.5 s `booked.at` script constant as a result).
+Filled by `python scripts/metrics_summary.py` after backend **#25** lands. Paste the script output here and into Devpost. Rows stay pending until then — including time-to-booked for GranniAI. A desk stopwatch of three sequential mock clinic dialogues (no GranniAI) was **201.5 s** on 2026-11-21; that is a manual baseline only. The GranniAI side is **not yet measured** (do not use the prototype’s 15.5 s `booked.at` script constant as a result).
 
 | Metric | Value |
 |---|---|
@@ -66,8 +66,8 @@ Filled by `python scripts/metrics_summary.py` after backend **#25** lands. Paste
 | Call-agent first token p50 (ms) | — |
 | Ranking latency p50 (ms) | — |
 | Bytes sent to cloud per request | — |
-| Time to booked — LifeLine (s) | — |
-| Time to booked — manual (s) | 201.5 (desk rehearsal; LifeLine not yet measured) |
+| Time to booked — GranniAI (s) | — |
+| Time to booked — manual (s) | 201.5 (desk rehearsal; GranniAI not yet measured) |
 
 ---
 
@@ -75,7 +75,7 @@ Filled by `python scripts/metrics_summary.py` after backend **#25** lands. Paste
 
 ### Tagline
 
-One request, three phone calls, one tap — LifeLine books the appointment and brings family in only when it has to.
+One request, three phone calls, one tap — GranniAI books the appointment and brings family in only when it has to.
 
 ### Inspiration
 
@@ -103,7 +103,7 @@ Smaller local models earn their place when the job is redaction. Ranking and liv
 
 ### What's next
 
-Live metrics and the time-to-booked comparison from #25’s summary once a real LifeLine run is timed; real Places/Calendar/SMS where still mocked; never real clinic robocalls without consent and legal review.
+Live metrics and the time-to-booked comparison from #25’s summary once a real GranniAI run is timed; real Places/Calendar/SMS where still mocked; never real clinic robocalls without consent and legal review.
 
 ### Built with
 
@@ -115,4 +115,4 @@ See `README.md`. Demo phones only on `DEMO_PHONE_ALLOWLIST`. Transport and clini
 
 ### The number we close on
 
-Close on **privacy + one approval** until #25 ships a measured LifeLine time-to-booked. Manual desk baseline only: **201.5 s** for three sequential mock clinic dialogues without LifeLine. Do not claim a LifeLine seconds figure from the prototype replay.
+Close on **privacy + one approval** until #25 ships a measured GranniAI time-to-booked. Manual desk baseline only: **201.5 s** for three sequential mock clinic dialogues without GranniAI. Do not claim a GranniAI seconds figure from the prototype replay.

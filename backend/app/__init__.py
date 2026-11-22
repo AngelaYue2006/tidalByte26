@@ -1,4 +1,4 @@
-"""LifeLine backend package.
+"""GranniAI backend package.
 
 The orchestrator reaches vendors only through the sibling top-level package `integrations/` (docs/ARCHITECTURE.md).
 `cd backend && uvicorn app.main:app` and `pytest backend` put only `backend/` on the path, so the repo root is added
