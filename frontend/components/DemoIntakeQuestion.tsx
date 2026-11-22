@@ -27,7 +27,7 @@ export default function DemoIntakeQuestion({ draft, change, finish, demo = true 
   return <main className="simple-main"><SimplePanel stage="request" demo={demo}
     title={budget ? "How much would you like to spend?" : "Will you need a ride?"}>
     <p className="intake-progress">Before we call · Question {draft.index + 1} of {fields.length}</p>
-    <p>{budget ? "We’ll look for a dental cleaning within your budget." : "This helps LifeLine plan transportation if you approve an appointment."}</p>
+    <p>{budget ? "We’ll look for a dental cleaning within your budget." : "This helps AIGranni plan transportation if you approve an appointment."}</p>
     <form className="simple-form" onSubmit={e => {
       e.preventDefault();
       if (!selected) return;

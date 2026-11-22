@@ -5,8 +5,8 @@ import "./globals.css";
 import "./studio.css";
 
 export const metadata: Metadata = {
-  title: "LifeLine",
-  description: "LifeLine dashboard — live appointment booking trail",
+  title: "AIGranni",
+  description: "AIGranni dashboard — live appointment booking trail",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -16,7 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Suspense
           fallback={
             <header className="site-header">
-              <span className="brand">LifeLine</span>
+              <span className="brand">AIGranni</span>
             </header>
           }
         >

@@ -56,7 +56,7 @@ export default function DemoRequestFlow({ viewer }: { viewer: Viewer }) {
   if (!ready) return <main aria-busy="true"/>;
   if (!run && draft) {
     if (contact) return <main className="simple-main"><SimplePanel demo stage="request" title="Waiting for Mary">
-      <p>Mary has a question to answer in her view before LifeLine calls clinics.</p>
+      <p>Mary has a question to answer in her view before AIGranni calls clinics.</p>
     </SimplePanel></main>;
     return <DemoIntakeQuestion key={draft.index} draft={draft} change={changeDraft} finish={beginCalls}/>;
   }
