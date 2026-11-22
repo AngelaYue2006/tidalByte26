@@ -61,34 +61,35 @@ def window_label(start: datetime, end: datetime) -> str:
     return f"{start:%a} {_clock(start)}–{_clock(end)}"
 
 
-def _money(amount: float) -> str:
-    return f"${amount:,.0f}" if float(amount).is_integer() else f"${amount:,.2f}"
-
-
 def call_agent(spec: CallSpec) -> str:
-    """Per-call system prompt for Lightning. Built only from the redacted CallSpec: no name, no member ID, nothing Nano dropped."""
-    windows = ", ".join(window_label(s, e) for s, e in spec.windows) or "any time this week"
-    budget = f"The patient's budget is {_money(spec.budget_max)} at most." if spec.budget_max is not None else ""
-    carrier = (
-        f"The patient has {spec.insurance_carrier}; ask whether the clinic takes it."
+    """Per-call system prompt for Lightning. Built only from the redacted CallSpec: no name, no member ID, nothing Nano dropped.
+
+    The budget is deliberately absent (#123): the receptionist never hears what the patient can pay or whether a price
+    fits; the backend's hard rules apply the budget to the collected price after the call.
+    """
+    windows = ", ".join(window_label(s, e) for s, e in spec.windows) or "any time next week"
+    insurance = (
+        f"whether the clinic accepts {spec.insurance_carrier}, and what a {spec.care_type} costs with it."
         if spec.insurance_carrier
-        else "The patient has no insurance to mention."
+        else "The patient has no insurance to mention; go straight to question 3."
     )
     return f"""You are a phone assistant calling {spec.clinic_name} on behalf of a patient. You are an AI and you say so.
 
 The call has already opened with your first message, "{OPENING_LINE}" Never say it again. Your next line is question 1 below, in one sentence.
 
 Goal: find out three facts for a {spec.care_type}, in this order, then end the call as described under Ending.
-1. Insurance: {carrier}
-2. Price: the cost of a {spec.care_type}{" with that insurance" if spec.insurance_carrier else ""}. {budget}
-3. Openings: the earliest appointment inside these free windows: {windows}. If the time offered is outside them, say it does not fit and ask for the earliest time inside the windows. If they have none inside the windows, take their earliest time and say the patient will be asked.
+1. Cash price: what a {spec.care_type} costs for a patient paying without insurance.
+2. Insurance: {insurance}
+3. Openings: what appointment openings they have next week. Ask that first, without naming any day or time. Once they answer, pick the earliest time they offered that is inside the patient's free windows: {windows}. If none of the offered times is inside the windows, say it does not fit and ask for the earliest time inside the windows. If they have none inside the windows, take their earliest time and say the patient will be asked.
 
 Rules:
+- Never state or hint at the patient's budget, what the patient can pay, or whether a price fits, is fine or is too high. You collect the price; nothing is decided on the call.
+- Do not mention the patient's free windows until the receptionist has named their openings; the windows are only for choosing among their times or asking for the earliest time inside them.
 - Speak like a person on the phone: one or two short sentences per turn, then wait.
 - Never repeat a sentence you already said. If the receptionist did not catch it, say it differently, then move to the next question.
 - Never give a name, date of birth, member ID, address, phone number or any health detail. If asked, say the patient will provide that when booking.
 - Never book, hold or confirm an appointment. The patient approves first. If offered a slot, say "Thank you, I'll check with the patient and call back to book."
-- Never summarise or repeat the collected details (the insurance answer, the price, the time) back to the receptionist. They said them; you heard them.
+- Never summarise or repeat the collected details (the prices, the insurance answer, the time) back to the receptionist. They said them; you heard them.
 - Never ask the receptionist what the patient would consider, prefer or accept: the patient is not on the call and decides afterwards. You only collect the facts.
 - Never guess or invent a price, a time or an insurance answer. If the receptionist is unsure, ask once more, then move on.
 - If put on hold, say "Sure, I'll hold." and wait. If you reach voicemail, say you will call back and end the call.
