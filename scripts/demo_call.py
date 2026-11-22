@@ -51,6 +51,8 @@ def database_url(settings: Settings) -> str:
     """The backend's own database. A relative sqlite path in .env is relative to backend/, where uvicorn runs."""
     url = settings.database_url
     prefix = "sqlite:///"
+    if url.startswith("sqlite:////"):
+        return url
     if url.startswith(prefix):
         relative = url[len(prefix):].removeprefix("./")
         if relative == ":memory:" or Path(relative).is_absolute() or PureWindowsPath(relative).is_absolute():
