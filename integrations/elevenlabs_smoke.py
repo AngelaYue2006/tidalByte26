@@ -59,6 +59,20 @@ def conversation_checks(data):
     }
 
 
+def wait_for_call_end(twilio, sid, destination, watchdog, control):
+    """Cancel the fallback timer when Twilio reports a terminal call naturally."""
+    while watchdog.is_alive():
+        call = twilio.calls(sid).fetch()
+        require_allowlisted(call.to)
+        if call.to != destination:
+            raise RuntimeError("Call-control destination mismatch")
+        if call.status in {"completed", "busy", "failed", "no-answer", "canceled"}:
+            watchdog.cancel()
+            control["status"], control["duration"] = call.status, call.duration
+            return
+        watchdog.join(timeout=2)
+
+
 def run(args):
     if args.env_file.name != ".env" or not args.env_file.is_file():
         raise RuntimeError("Provide the existing ignored .env")
@@ -74,7 +88,7 @@ def run(args):
     twilio = Client(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"],
                     http_client=transport)
     twilio.calls.list(limit=1)  # fail before dialing if call control is inaccessible
-    control = {"sid": None, "error": False, "status": None, "duration": None}
+    control = {"sid": None, "error": False, "status": None, "duration": None, "forced_hangup": False}
     watchdog = None
     original = elevenlabs_api.ElevenLabsClient.request
 
@@ -85,6 +99,7 @@ def run(args):
             if call.to != destination:
                 raise RuntimeError("Call-control destination mismatch")
             if call.status not in {"completed", "busy", "failed", "no-answer", "canceled"}:
+                control["forced_hangup"] = True
                 twilio.calls(control["sid"]).update(status="completed")
             final = twilio.calls(control["sid"]).fetch()
             control["status"] = final.status
@@ -99,10 +114,10 @@ def run(args):
         if method == "POST" and path == "twilio/outbound-call":
             control["sid"] = data.get("callSid")
             if control["sid"]:
-                watchdog = threading.Timer(60, stop_call)
+                watchdog = threading.Timer(250, stop_call)
                 watchdog.start()
             else:
-                print("No Twilio control receipt; teammate must hang up before one minute", flush=True)
+                print("No Twilio control receipt; teammate must hang up at the safety limit", flush=True)
         return data
 
     with httpx.Client(base_url=os.environ["PUBLIC_BASE_URL"].rstrip("/"), timeout=5) as client:
@@ -112,13 +127,13 @@ def run(args):
             handle = voice_elevenlabs.start_call(spec)
         print("Adapter accepted one live call; simulated=" + str(handle.simulated), flush=True)
         if watchdog:
-            while watchdog.is_alive():
-                watchdog.join(timeout=1)  # keep the sixty-second watchdog responsive
+            wait_for_call_end(twilio, control["sid"], destination, watchdog, control)
         else:
             raise RuntimeError("Missing call-control receipt; verify hangup before retrying")
         if control["error"]:
             raise RuntimeError("Call duration could not be verified")
         print("Twilio terminal status:", control["status"], "duration seconds:", control["duration"], flush=True)
+        print("Harness forced hangup:", control["forced_hangup"], flush=True)
         deadline = time.monotonic() + 45
         lines, results = [], []
         while time.monotonic() < deadline:

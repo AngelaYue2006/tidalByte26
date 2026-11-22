@@ -307,9 +307,9 @@ It refuses unknown clinics, missing/ambiguous contexts and already completed
 calls. Never reuse a context after a partially successful or ambiguous dial.
 
 The test checks Twilio read access before dialing, captures only this dial's
-call-control receipt, and schedules a hangup after 60 seconds. It rechecks the
+call-control receipt, and allows natural termination and schedules a fallback hangup after 250 seconds. It rechecks the
 actual Twilio destination before call control. The teammate should also hang up
-at the one-minute limit if call control reports a failure. Output contains only
+at the 250-second safety limit if call control reports a failure. Output contains only
 receipt/status/count/disclosure checks, never phone numbers or transcript text.
 No audio is fetched or stored; the adapter's recording-off preflight still runs.
 An accepted dial is not a booking or proof of a complete offer. The command
@@ -320,3 +320,10 @@ reply. The smoke harness verifies disclosure against the vendor text transcript,
 not the first backend-recorded generated reply. It reports only booleans/counts,
 including interrupted turns and audio-storage flags. A hard duration limit may
 cut off a closing sentence; finish the demo exchange before the cutoff.
+
+The 250-second timer is a safety cap, not the normal conversation endpoint.
+The harness polls this dial's Twilio receipt and cancels the timer immediately
+when the call ends naturally. It reports whether it forced a hangup so a cutoff
+cannot be mistaken for a natural farewell. Earlier 40/60-second live trials are
+historical evidence only; the collection-configuration inference from an
+incomplete API field check was withdrawn in PR #84.

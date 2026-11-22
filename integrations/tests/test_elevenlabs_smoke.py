@@ -4,7 +4,12 @@ from unittest.mock import Mock
 
 import pytest
 
-from integrations.elevenlabs_smoke import context, conversation_checks, spec_for
+from integrations.elevenlabs_smoke import (
+    context,
+    conversation_checks,
+    spec_for,
+    wait_for_call_end,
+)
 from integrations.fixtures import read_fixture
 
 
@@ -67,3 +72,29 @@ def test_conversation_checks_report_missing_disclosure_and_audio_storage():
                                   "has_user_audio": True})
     assert checks["opening_discloses_ai"] is False
     assert checks["stored_audio"] is True
+
+
+def test_natural_call_end_cancels_timer_without_hangup(monkeypatch):
+    monkeypatch.setenv("DEMO_PHONE_ALLOWLIST", "+15555550901")
+    twilio, timer = Mock(), Mock()
+    active = Mock(to="+15555550901", status="in-progress", duration=None)
+    completed = Mock(to="+15555550901", status="completed", duration="92")
+    twilio.calls.return_value.fetch.side_effect = [active, completed]
+    timer.is_alive.return_value = True
+    control = {"forced_hangup": False}
+    wait_for_call_end(twilio, "synthetic-sid", "+15555550901", timer, control)
+    timer.cancel.assert_called_once_with()
+    timer.join.assert_called_once_with(timeout=2)
+    twilio.calls.return_value.update.assert_not_called()
+    assert control == {"forced_hangup": False, "status": "completed", "duration": "92"}
+
+
+def test_natural_end_does_not_cancel_timer_for_another_destination(monkeypatch):
+    monkeypatch.setenv("DEMO_PHONE_ALLOWLIST", "+15555550901,+15555550902")
+    twilio, timer = Mock(), Mock()
+    twilio.calls.return_value.fetch.return_value = Mock(to="+15555550902", status="completed")
+    timer.is_alive.return_value = True
+    with pytest.raises(RuntimeError, match="destination mismatch"):
+        wait_for_call_end(twilio, "synthetic-sid", "+15555550901", timer, {})
+    timer.cancel.assert_not_called()
+    twilio.calls.return_value.update.assert_not_called()
