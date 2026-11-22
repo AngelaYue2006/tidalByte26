@@ -88,10 +88,11 @@
           "properties": {
             "type": { "const": "transcript" },
             "call_id": { "$ref": "#/$defs/call_id" },
+            "seq": { "type": "integer", "minimum": 1, "description": "1-based position of the line in its call; a retried proxy turn reuses the same seq, so (call_id, seq) is unique." },
             "speaker": { "type": "string", "enum": ["agent", "clinic"] },
             "text": { "type": "string" }
           },
-          "required": ["type", "call_id", "speaker", "text"]
+          "required": ["type", "call_id", "seq", "speaker", "text"]
         }
       ]
     },
@@ -259,7 +260,8 @@
           "properties": {
             "type": { "const": "task_updated" },
             "status": { "$ref": "task.schema.json#/$defs/status" },
-            "reason": { "type": "string", "description": "Error code when the status is failed." }
+            "reason": { "type": "string", "description": "Error code when the status is failed, or the note code beside a waiting status (SMS_NOT_SENT, CONTACT_DECLINED, UNVERIFIED_SENDER, APPROVAL_TIMEOUT)." },
+            "message": { "type": "string", "description": "Plain words for the dashboard beside the reason. Optional." }
           },
           "required": ["type", "status"]
         }
