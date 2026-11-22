@@ -419,6 +419,12 @@ def test_prompt_discloses_ai_and_never_books():
     assert "Your next line is question 1" in prompt and "in one sentence" in prompt
     assert "Never repeat a sentence you already said" in prompt
     assert "first words" not in prompt.lower()
+    # #94: on the second live call the agent asked the receptionist what the patient would consider when the offered
+    # slot fell outside the windows, so the call ended with no slot. The agent collects facts; the patient decides later.
+    assert "say it does not fit and ask for the earliest time inside the windows" in prompt
+    assert "take their earliest time and say the patient will be asked" in prompt
+    assert "Never ask the receptionist what the patient would consider" in prompt
+    assert "ask for the earliest they have and note it" not in prompt
     assert "You are an AI" in prompt
     assert "Never book" in prompt
     assert "no insurance to mention" in prompt
