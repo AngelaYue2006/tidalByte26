@@ -52,7 +52,7 @@ Deterministic, in this order. Each step writes an event; the task status is the 
 
 2. `calendar` — `calendar.free_windows()` for the requested range.
 3. `places` — `places.find_clinics()` top 3, then `distance.drive()` from the owner's home. Emit `call_start` ×3 with distance meta.
-4. `calling` — `voice.start_call()` ×3 in parallel. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`. Mock and simulator lines take the same recorder (`llm_proxy.record_turn`, one `turns` row and one `transcript` event per `(call_id, seq)`), labelled `simulated: true`.
+4. `calling` - three simulated calls by default; the opt-in local live path calls `voice.start_call()` once. Transcript lines arrive through the LLM proxy and the post-call webhook; emit `call_status`, `transcript`, `call_result`. Mock and simulator lines take the same recorder (`llm_proxy.record_turn`, one `turns` row and one `transcript` event per `(call_id, seq)`), labelled `simulated: true`.
 5. `ranking` — `ranking.hard_rules()` drops offers over budget, outside free windows, or not insured. `ranker.rank()` (Super) scores the rest. Emit `decision`. If nothing survives, status `failed` with reason, emit `task_updated`, notify both, stop.
 6. `awaiting_approval` — SMS the owner the pick. Emit `approval_required`. Wait for `POST /api/tasks/{id}/approve` or SMS `YES`. Timeout: one reminder, then stay waiting.
 7. `booking` — `voice.confirm_booking()` (a short call-back, or the mock) returns `Confirmation`. Only on `confirmed`: `calendar.create_event()` once, keyed by task id. Emit `booked`. On `tentative`: emit `booked` with `tentative: true` and no calendar event.
@@ -148,6 +148,16 @@ transport.check(booking: Booking, needs: dict) -> TransportOptions     # fixture
 `Decision`: `{winner_call_id, score, reasons: [..], second: [..], tradeoff, ranked: [{call_id, score}]}`.
 `Confirmation`: `{status, confirmation_ref, evidence: "clinic said ..." }`.
 
+### Opt-in local single-call pipeline
+
+`VOICE_MODE=live` selects the backend's `VoiceLiveBridge`. `DEMO_VOICE_TARGET` is required and must be an allowlisted teammate, distinct from the Twilio sender. Discovery selects one clinic and substitutes this demo destination; no real clinic phone is dialled. Mock mode retains its three receptionists.
+
+The backend writes the task, call and route facts before dialling. A unique `voice:start:<call_id>` receipt is reserved before the outbound request; ambiguous failures are never automatically redialled. The returned conversation ID is persisted as `calls.external_ref`. The proxy and signed webhook own transcript/result events; the bridge reads complete structured facts without republishing them, then ranking proceeds to owner approval. Missing facts never become an offer. Live booking confirmation remains unsupported, so approval yields `BOOKING_REJECTED` with no booking or calendar write.
+
+The bridge waits up to 360 seconds for post-call processing. This is a result-wait timeout, **not a phone hangup cap**. The call ends through the agent or recipient; configure the agent duration limit before a live test. Reset, cancellation or backend shutdown does not hang up a vendor call; do not reset during a call. The public proxy/webhook URL and the frontend must reach this same backend/database, not another teammate's backend.
+
+From the repo root, `python -m backend.run_live --env-file PATH_TO_IGNORED_ENV --allowlist-index 1` starts this opt-in path on port 8000 using a separate `lifeline-live.db`. It reads the selected .env without changing it, selects that one recipient and sets live voice for this process. Ollama and the configured Nano model must run locally; the configured Lightning/Super credentials and model IDs are also required. Point the tunnel at this server and configure the ElevenLabs proxy/webhook to its public URL. Set the frontend's `BACKEND_URL` to `http://localhost:8000` and restart its dev server. This local wiring has automated tests with vendor I/O replaced; a real frontend-to-phone rehearsal remains a manual acceptance step.
+
 ## ElevenLabs custom-LLM proxy
 
 ElevenLabs calls `POST /v1/chat/completions` on the tunnel URL with the conversation so far. The proxy: checks `elevenlabs_extra_body.proxy_secret` against `LLM_PROXY_SECRET`, reads `call_id` from the same `elevenlabs_extra_body` (set per call as `custom_llm_extra_body` at call start; dynamic variables do not reach the proxy, they come back in the post-call webhook), builds the system prompt from `prompts.call_agent(call_spec)`, forwards to the NVIDIA API with `NEMOTRON_LIGHTNING_ID` and `stream: true`, relays the stream back, and writes each completed agent and clinic turn to `turns` while emitting `transcript` events. The post-call webhook supplies the final transcript and the data-collection fields (`price`, `slot`, `insured`); if any is missing, Super extracts it from the transcript. The webhook is verified with `ELEVENLABS_WEBHOOK_SECRET` (`ElevenLabs-Signature` header) before anything is read. Verified field names: [`docs/ELEVENLABS.md`](ELEVENLABS.md).
@@ -190,6 +200,7 @@ GOOGLE_CLIENT_SECRET=
 GOOGLE_REFRESH_TOKEN=       # one test account
 GOOGLE_MAPS_API_KEY=        # Places + Routes API
 DEMO_PHONE_ALLOWLIST=       # comma-separated teammate numbers, E.164
+DEMO_VOICE_TARGET=          # one allowlisted teammate for the opt-in single live call
 VOICE_MODE=mock             # mock | live
 PLACES_MODE=fixture         # fixture | live
 CALENDAR_MODE=mock          # mock | live

@@ -21,7 +21,7 @@ from app import receipts, texts
 from app.adapters import Deps
 from app.db import session_scope
 from app.events import EventBus, emit
-from app.models import Call, Task
+from app.models import Call, Receipt, Task
 from app.nemotron import local_intake
 from app.nemotron.ranker import timed_rank
 from app.nemotron.types import IntakeRequest, UserRecord
@@ -219,13 +219,16 @@ class Pipeline:
             for letter, clinic in zip(CALL_IDS, run.clinics, strict=False):
                 call_id = f"{run.task_id[:8]}-{letter}"
                 distance = distances.get(clinic.place_id)
+                if distance is not None:
+                    session.add(Receipt(task_id=run.task_id, step=f"call:route:{call_id}", kind="route",
+                                        payload_json=distance.model_dump_json()))
                 run.specs[call_id] = CallSpec(clinic=clinic, request=wire_request, windows=run.windows, call_id=call_id)
                 session.add(Call(id=call_id, task_id=run.task_id, clinic_name=clinic.name, clinic_phone=clinic.phone_e164,
                                  distance_mi=distance.miles if distance else None, status="dialing", started_at=datetime.now(UTC)))
         for call_id, spec in run.specs.items():
             distance = distances.get(spec.clinic.place_id)
             meta = f"{distance.miles:g} mi · {distance.minutes:g} min" if distance else ""
-            self._emit(run, "call_start", {"call_id": call_id, "clinic": spec.clinic.name, "meta": meta, "simulated": spec.clinic.simulated}, "contact")
+            self._emit(run, "call_start", {"call_id": call_id, "clinic": spec.clinic.name, "meta": meta, "simulated": getattr(self.deps.voice, "simulated", spec.clinic.simulated)}, "contact")
 
     async def _calling(self, run: Run) -> None:
         self._set_status(run, "calling")
@@ -312,6 +315,8 @@ class Pipeline:
         return self._status(run) == "awaiting_approval"  # a rejection moved it to cancelled
 
     def _booking(self, run: Run) -> None:
+        if not getattr(self.deps.voice, "booking_available", True):
+            raise PipelineFailure("BOOKING_REJECTED", "The live call collected availability only. No appointment was booked; live confirmation is not configured.")
         self._set_status(run, "booking")
         winner = run.winner
         spec = run.specs[winner.call_id]

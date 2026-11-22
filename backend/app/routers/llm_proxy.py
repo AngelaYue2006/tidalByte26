@@ -24,7 +24,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import Engine
+from sqlalchemy import Engine, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
@@ -32,7 +32,7 @@ from app import metrics
 from app.config import MissingSetting, Settings
 from app.db import session_scope
 from app.events import EventBus
-from app.models import Call, Event, Task, Turn
+from app.models import Call, Event, Receipt, Task, Turn
 from app.nemotron.call_agent import (
     ChatStream,
     LightningClient,
@@ -129,11 +129,27 @@ def record_turn(engine: Engine, bus: EventBus, spec: CallSpec, seq: int, speaker
         payload_json=json.dumps(payload, ensure_ascii=False),
         visibility="contact",  # docs/ARCHITECTURE.md: transcripts are visible to both roles; see the D6 open item
     )
+    status_event = None
     try:
         with session_scope(engine) as session:
             session.add(turn)
             session.add(event)
             session.flush()
+            # A real proxy turn is evidence that the call connected; an accepted
+            # outbound request alone is not. Reserve the transition atomically.
+            if not simulated and session.exec(select(Receipt).where(
+                Receipt.task_id == spec.task_id, Receipt.step == f"voice:start:{spec.call_id}",
+            )).first() is not None:
+                claimed = session.exec(update(Call).where(
+                    Call.id == spec.call_id, Call.status == "dialing",
+                ).values(status="live")).rowcount
+                if claimed:
+                    status_event = Event(task_id=spec.task_id, type="call_status", visibility="contact",
+                                         payload_json=json.dumps({"call_id": spec.call_id, "status": "live"}))
+                    session.add(status_event)
+                    session.flush()
+                    session.refresh(status_event)
+                    session.expunge(status_event)
             session.refresh(turn)
             session.refresh(event)
             session.expunge(turn)
@@ -141,7 +157,10 @@ def record_turn(engine: Engine, bus: EventBus, spec: CallSpec, seq: int, speaker
     except IntegrityError:
         log.info("turn %s of call %s already recorded; retry ignored", seq, spec.call_id)
         return None
-    bus.publish(event, _owner_id(engine, spec.task_id))
+    owner_id = _owner_id(engine, spec.task_id)
+    if status_event is not None:
+        bus.publish(status_event, owner_id)
+    bus.publish(event, owner_id)
     return turn
 
 

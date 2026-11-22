@@ -86,6 +86,8 @@ class Settings(BaseModel):
     google_refresh_token: str | None = None
     google_maps_api_key: str | None = None
 
+    demo_voice_target: str | None = None  # explicit single teammate destination for live calls
+
     demo_phone_allowlist: tuple[str, ...] = Field(default_factory=tuple)
 
     voice_mode: Mode = "mock"
@@ -146,6 +148,13 @@ class Settings(BaseModel):
         for adapter, needed in LIVE_REQUIREMENTS.items():
             if self.modes[adapter] == "live":
                 missing += [name for name in needed if not getattr(self, name.lower())]
+        if self.voice_mode == "live" and not self.demo_voice_target:
+            missing.append("DEMO_VOICE_TARGET")
+        if self.voice_mode == "live" and self.demo_voice_target and (
+            self.demo_voice_target not in self.demo_phone_allowlist
+            or self.demo_voice_target == self.twilio_phone_number
+        ):
+            raise MissingSetting("DEMO_VOICE_TARGET must be an allowlisted teammate phone, not the Twilio sender")
         if missing:
             raise MissingSetting(
                 "startup needs values that are empty in .env: "

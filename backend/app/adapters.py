@@ -95,10 +95,25 @@ def _missing(what: str):
     raise RuntimeError(f"ranking needs {what} in .env")
 
 
-def build_deps(settings: Settings) -> Deps:
+def build_deps(settings: Settings, engine=None) -> Deps:
     deps = Deps()
-    if settings.voice_mode != "mock":
-        raise RuntimeError("VOICE_MODE=live is #26's work; this pipeline runs with VOICE_MODE=mock")
+    if settings.voice_mode == "live":
+        from app.voice_live import VoiceLiveBridge
+        from integrations.phone_policy import require_allowlisted
+
+        if engine is None:
+            raise RuntimeError("Live voice needs the backend database engine")
+        target = settings.demo_voice_target
+        if not target or target not in settings.demo_phone_allowlist or target == settings.twilio_phone_number:
+            raise RuntimeError("DEMO_VOICE_TARGET must name one allowlisted teammate phone")
+        deps.voice = VoiceLiveBridge(engine)
+
+        def one_demo_clinic(care_type, area, limit=3):
+            require_allowlisted(target)
+            clinics = google_places.find_clinics(care_type, area, 1)
+            return [clinic.model_copy(update={"phone_e164": target}) for clinic in clinics[:1]]
+
+        deps.find_clinics = one_demo_clinic
 
     def rank_client() -> ranker.ChatJSON:
         return ranker.NvidiaChatClient(settings.nvidia_api_key or "", settings.require_model("super"))

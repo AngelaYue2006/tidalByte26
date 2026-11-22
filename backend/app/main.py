@@ -64,7 +64,7 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
         32
     )
     app.state.heartbeat_seconds = live.HEARTBEAT_SECONDS
-    app.state.pipeline = Pipeline(deps or build_deps(settings), engine, app.state.bus, approval_timeout_s=settings.approval_timeout_min * 60)
+    app.state.pipeline = Pipeline(deps or build_deps(settings, engine), engine, app.state.bus, approval_timeout_s=settings.approval_timeout_min * 60)
     app.include_router(demo.router)
     app.include_router(session.router)
     app.include_router(live.router)

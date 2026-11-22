@@ -8,6 +8,8 @@
 
 **Required connected pieces:** local Nemotron Nano intake (Ollama), Google Calendar free/busy and insert, Google Places and Routes API, three outbound ElevenLabs calls over Twilio with Nemotron Lightning answering, Nemotron Super ranking with reason tags, SQLite task state, SSE live stream, Next.js dashboard with owner and contact views, Twilio SMS both ways, simulated transport adapter.
 
+**Opt-in local phone test:** `VOICE_MODE=live` runs one discovery call to `DEMO_VOICE_TARGET` (an allowlisted teammate), then ranks verified webhook facts. The stage demo remains mock by default. Live booking confirmation is not implemented; approving the live offer does not book or write a calendar event. See the local single-call setup in `ARCHITECTURE.md`.
+
 **Fallbacks (same events, labelled on screen):** `VOICE_MODE=mock` scripted receptionists; `PLACES_MODE=fixture` three hard-coded clinics; `CALENDAR_MODE=mock`; `SMS_MODE=mock` writes to the dashboard instead of sending; `LIVE_STREAM_MODE=poll`.
 
 ## Acceptance criteria
