@@ -117,7 +117,7 @@ When a rule matters, put it in `tests/scenarios/` or `backend/tests/` so it fail
 ## Common issues
 
 - **`EventSource` cannot set headers.** `GET /api/live` is authorised by `viewer_id` and the session cookie, reached through the Next.js rewrite on the same origin.
-- **Tunnels buffer SSE.** Send `heartbeat` every 15 s and set `Cache-Control: no-cache`, `X-Accel-Buffering: no`. Test on the real ngrok URL, not localhost, before trusting it.
+- **Tunnels and the Next.js dev server buffer SSE.** Send `heartbeat` every 15 s and set `Cache-Control: no-cache, no-transform`, `Content-Encoding: identity`, `X-Accel-Buffering: no`; without `no-transform` the dev server gzips the stream and the browser receives nothing. Test on the real ngrok URL, not localhost, before trusting it.
 - **Twilio retries webhooks** on any non-2xx or slow response. Respond 200 fast, do the work after, key everything by `MessageSid`.
 - **ElevenLabs calls your proxy with the whole conversation each turn.** `call_id` and the proxy secret arrive in `elevenlabs_extra_body` (sent as `custom_llm_extra_body` when the call starts; dynamic variables do not reach the proxy); never trust the model to repeat it. Details: `docs/ELEVENLABS.md`.
 - **Ollama must already be running** or intake fails with a connection error, not a model error. `curl localhost:11434` first.
