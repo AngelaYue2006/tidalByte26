@@ -425,6 +425,12 @@ def test_prompt_discloses_ai_and_never_books():
     assert "take their earliest time and say the patient will be asked" in prompt
     assert "Never ask the receptionist what the patient would consider" in prompt
     assert "ask for the earliest they have and note it" not in prompt
+    # Third live call: with a valid time the agent recited the collected facts back to the receptionist. The ending is
+    # now fixed: thank them, say the patient's assistant will call back to book, end. Never book, hold or confirm stays.
+    assert "Ending: once you know the insurance answer, the price and a time, thank them, say the patient's assistant will call back to book, and end the call." in prompt
+    assert "Never summarise or repeat the collected details" in prompt
+    assert "Never book, hold or confirm an appointment" in prompt
+    assert "hold that time" not in prompt and "say goodbye in one sentence" not in prompt
     assert "You are an AI" in prompt
     assert "Never book" in prompt
     assert "no insurance to mention" in prompt

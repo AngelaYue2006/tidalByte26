@@ -114,7 +114,7 @@ The prototype `frontend/prototype/index.html` renders the first eight exactly as
 { type: "contact_request", contact, message }
 { type: "contact_reply", contact, text, offer }
 { type: "ride_confirmed", driver, pickup_time }
-{ type: "task_updated", status }
+{ type: "task_updated", status, reason?, message? }                    // reason: error code or note code; message: plain words for the dashboard
 { type: "snapshot", task, calls, events }                    // first message on every (re)connect
 { type: "heartbeat" }                                        // every 15 s
 ```
