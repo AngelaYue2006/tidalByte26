@@ -35,7 +35,7 @@ const TRANSPORT_EVENTS: LiveEvent[] = [
     type: "contact_request",
     contact: "Sarah (daughter)",
     message:
-      "AIGranni: Mary needs a ride to Bright Smile Dental, Thu Nov 26 at 9:30 AM, 123 Main St. Can you drive?",
+      "GranniAI: Mary needs a ride to Bright Smile Dental, Thu Nov 26 at 9:30 AM, 123 Main St. Can you drive?",
   },
   {
     type: "contact_reply",

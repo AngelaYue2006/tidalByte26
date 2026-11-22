@@ -19,7 +19,7 @@ export default function Header() {
     router.push(`/?${query}`);
   }
   return <header className="site-header">
-    <WorkspaceLink href="/" className="brand"><IconActivityHeartbeat aria-hidden stroke={1.75}/>AIGranni</WorkspaceLink>
+    <WorkspaceLink href="/" className="brand"><IconActivityHeartbeat aria-hidden stroke={1.75}/>GranniAI</WorkspaceLink>
     <nav className="header-links" aria-label="Primary">
       {[["/", "Activity"], ["/history", "History"], ["/calendar", "Calendar"]].map(([path, label]) =>
         <WorkspaceLink key={path} href={path} className="header-pill"

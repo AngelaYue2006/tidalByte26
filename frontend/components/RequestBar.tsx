@@ -135,7 +135,7 @@ export default function RequestBar({ viewer, chips = [], requestText, simple, de
 
   if (simple) return (
     <form className="simple-form" onSubmit={onSubmit}>
-      <label htmlFor="simple-request">{viewer.role === "contact" ? "Tell AIGranni what Mary needs" : "Tell AIGranni what you need"}</label>
+      <label htmlFor="simple-request">{viewer.role === "contact" ? "Tell GranniAI what Mary needs" : "Tell GranniAI what you need"}</label>
       <textarea id="simple-request" rows={3} value={text} disabled={submitting}
         placeholder={viewer.role === "contact" ? "For example, Mary needs a dental cleaning this week." : "For example, I need a dental cleaning this week."} onChange={e => setText(e.target.value)} />
       <div className="form-actions">
