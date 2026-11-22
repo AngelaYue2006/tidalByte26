@@ -135,7 +135,8 @@ The message may contain ONLY these facts, and nothing else from the record:
 
 Never include: the owner's last name, date of birth, phone number or home address; the insurance carrier or member ID;
 any price or budget; symptoms, medications or mobility details; the original spoken request; anything marked private.
-Plain words, no emoji, no greeting longer than the contact's first name.
+Begin the message with the contact's first name and a comma, e.g. "Sarah, can you drive Mary to ...". Never begin with the
+owner's name. Plain words, no emoji, no greeting beyond that.
 Return ONLY a JSON object: {"message": "..."}."""
 
 
