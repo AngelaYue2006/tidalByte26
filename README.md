@@ -52,6 +52,7 @@ backend:   uvicorn app.main:app --reload --port 8000     (from backend/)
 frontend:  npm run dev                                   (from frontend/, port 3000)
 ollama:    ollama run <nemotron-nano-4bit-tag>           (local intake model)
 tunnel:    ngrok http 8000                               (Twilio + ElevenLabs webhooks)
+demo call: python scripts/demo_call.py [--dry-run] [--to-entry N]   (seeds one call and rings an allowlisted phone; the pipeline stays on mock, D17)
 ```
 
 Fill in exact commands as each module lands. Secrets live in `.env`, never in the repo.
